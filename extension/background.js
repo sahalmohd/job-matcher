@@ -25,8 +25,12 @@ const DEFAULTS = {
     serverUrl: 'http://localhost:3456',
     platforms: { linkedin: true, indeed: true, glassdoor: true },
     weights: { tfidf: 0.6, skills: 0.4 },
+    llmEnabled: false,
+    llmWeight: 0.3,
   },
 };
+
+const LLM_BATCH_LIMIT = 10;
 
 const EMAIL_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -94,6 +98,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'CHECK_LLM_STATUS') {
+    checkLLMStatus(message.serverUrl).then((status) => sendResponse(status));
+    return true;
+  }
+
   if (message.type === 'GET_SEARCH_PROFILES') {
     getSearchProfiles().then((profiles) => sendResponse({ profiles }));
     return true;
@@ -155,11 +164,11 @@ async function saveMatches(matches) {
 
 async function handleJobsFound(jobs, source) {
   const resumeText = await getResumeText();
-  if (!resumeText) return; // No resume uploaded yet
+  if (!resumeText) return;
 
   const { settings, threshold } = await getSettings();
 
-  if (!settings.platforms[source]) return; // Platform disabled
+  if (!settings.platforms[source]) return;
 
   const jobsWithContent = jobs.filter((j) => {
     const hasDesc = j.description && j.description.length > 20;
@@ -168,24 +177,28 @@ async function handleJobsFound(jobs, source) {
   });
   if (jobsWithContent.length === 0) return;
 
-  const results = JobMatcher.matchJobs(resumeText, jobsWithContent, threshold, settings.weights);
+  let results = JobMatcher.matchJobs(resumeText, jobsWithContent, threshold, settings.weights);
   if (results.length === 0) return;
 
   const existingMatches = await getStoredMatches();
   const existingUrls = new Set(existingMatches.map((m) => m.job.url));
 
-  const newMatches = results.filter((r) => !existingUrls.has(r.job.url));
+  let newMatches = results.filter((r) => !existingUrls.has(r.job.url));
   if (newMatches.length === 0) return;
+
+  // Hybrid LLM scoring: enhance top matches with Ollama
+  if (settings.llmEnabled && settings.serverUrl) {
+    newMatches = await enhanceWithLLM(newMatches, resumeText, settings);
+  }
 
   const timestamped = newMatches.map((m) => ({
     ...m,
     matchedAt: new Date().toISOString(),
   }));
 
-  const allMatches = [...timestamped, ...existingMatches].slice(0, 200); // Cap at 200
+  const allMatches = [...timestamped, ...existingMatches].slice(0, 200);
   await saveMatches(allMatches);
 
-  // Chrome notifications
   if (settings.notificationsEnabled) {
     for (const match of newMatches.slice(0, 5)) {
       showNotification(match);
@@ -198,20 +211,83 @@ async function handleJobsFound(jobs, source) {
     }
   }
 
-  // Email notifications (batched with cooldown)
   if (settings.emailEnabled && settings.emailAddress) {
     queueEmailNotification(newMatches, settings);
   }
 
-  // Persist to backend server if configured
   if (settings.serverUrl) {
     persistToServer(newMatches, settings.serverUrl);
   }
 
-  // Update badge
   chrome.action.setBadgeText({ text: String(newMatches.length) });
   chrome.action.setBadgeBackgroundColor({ color: '#10B981' });
   setTimeout(() => chrome.action.setBadgeText({ text: '' }), 10000);
+}
+
+/**
+ * Send top matches to the backend for LLM scoring via Ollama,
+ * then combine local + LLM scores. Falls back silently on failure.
+ */
+async function enhanceWithLLM(matches, resumeText, settings) {
+  const topN = matches.slice(0, LLM_BATCH_LIMIT);
+  const rest = matches.slice(LLM_BATCH_LIMIT);
+
+  try {
+    const res = await fetch(`${settings.serverUrl}/api/llm/score-batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        resumeText,
+        jobs: topN.map((m) => m.job),
+      }),
+    });
+
+    if (!res.ok) return matches;
+
+    const data = await res.json();
+    if (!data.results || data.results.length === 0) return matches;
+
+    const llmWeight = settings.llmWeight || 0.3;
+    const localWeight = 1 - llmWeight;
+
+    const enhanced = topN.map((match, i) => {
+      const llmResult = data.results[i];
+      if (!llmResult || llmResult.score == null) return match;
+
+      const hybridScore = Math.round(
+        (localWeight * match.score + llmWeight * llmResult.score) * 100
+      ) / 100;
+
+      return {
+        ...match,
+        score: hybridScore,
+        localScore: match.score,
+        llmScore: llmResult.score,
+        llmRationale: llmResult.rationale || null,
+        llmKeyStrengths: llmResult.keyStrengths || [],
+        llmGaps: llmResult.gaps || [],
+        llmModel: llmResult.model || null,
+      };
+    });
+
+    const combined = [...enhanced, ...rest];
+    combined.sort((a, b) => b.score - a.score);
+    return combined;
+  } catch {
+    // Ollama/server unreachable — fall back to local scores silently
+    return matches;
+  }
+}
+
+async function checkLLMStatus(serverUrl) {
+  try {
+    const url = serverUrl || DEFAULTS.settings.serverUrl;
+    const res = await fetch(`${url}/api/llm/status`);
+    if (!res.ok) return { available: false, error: `Server returned ${res.status}` };
+    return await res.json();
+  } catch {
+    return { available: false, error: 'Backend server unreachable' };
+  }
 }
 
 async function scoreOneJob(job) {
@@ -342,8 +418,13 @@ async function handleJobsFoundFromScan(jobs, source) {
   const existingMatches = await getStoredMatches();
   const existingUrls = new Set(existingMatches.map((m) => m.job.url));
 
-  const newMatches = results.filter((r) => !existingUrls.has(r.job.url));
+  let newMatches = results.filter((r) => !existingUrls.has(r.job.url));
   if (newMatches.length === 0) return 0;
+
+  // Hybrid LLM scoring for scheduled scan results
+  if (settings.llmEnabled && settings.serverUrl) {
+    newMatches = await enhanceWithLLM(newMatches, resumeText, settings);
+  }
 
   const timestamped = newMatches.map((m) => ({
     ...m,

@@ -79,15 +79,36 @@ function createMatchCard(match) {
     .map((s) => `<span class="skill-tag skill-missing">${escapeHtml(s)}</span>`)
     .join('');
 
+  // LLM insight tags
+  const hasLLM = match.llmScore != null;
+  const llmStrengths = (match.llmKeyStrengths || [])
+    .slice(0, 3)
+    .map((s) => `<span class="skill-tag llm-strength">${escapeHtml(s)}</span>`)
+    .join('');
+  const llmGaps = (match.llmGaps || [])
+    .slice(0, 3)
+    .map((s) => `<span class="skill-tag llm-gap">${escapeHtml(s)}</span>`)
+    .join('');
+
+  const scoreBreakdown = hasLLM
+    ? `<span class="score-breakdown" title="Local: ${match.localScore}% | LLM: ${match.llmScore}%">Local ${match.localScore}% + LLM ${match.llmScore}%</span>`
+    : '';
+
+  const rationale = match.llmRationale
+    ? `<div class="llm-rationale">${escapeHtml(match.llmRationale)}</div>`
+    : '';
+
   card.innerHTML = `
     <div class="match-card-header">
       <span class="match-title">${escapeHtml(match.job.title || 'Untitled')}</span>
       <span class="match-score score-${category}">${match.score}%</span>
     </div>
     <div class="match-company">${escapeHtml(match.job.company || 'Unknown Company')}${match.job.location ? ' · ' + escapeHtml(match.job.location) : ''}</div>
-    ${matchedTags || missingTags ? `<div class="match-skills">${matchedTags}${missingTags}</div>` : ''}
+    ${scoreBreakdown}
+    ${rationale}
+    ${matchedTags || missingTags || llmStrengths || llmGaps ? `<div class="match-skills">${matchedTags}${llmStrengths}${missingTags}${llmGaps}</div>` : ''}
     <div class="match-meta">
-      <span class="platform-badge">${escapeHtml(match.job.platform || 'unknown')}</span>
+      <span class="platform-badge">${escapeHtml(match.job.platform || 'unknown')}${hasLLM ? ' + LLM' : ''}</span>
       <span>${timeAgo}</span>
     </div>
   `;
@@ -226,6 +247,20 @@ function setupSettings() {
     emailConfig.style.display = emailToggle.checked ? 'flex' : 'none';
   });
 
+  const llmToggle = document.getElementById('llmEnabled');
+  const llmConfig = document.getElementById('llmConfig');
+  const llmWeightSlider = document.getElementById('llmWeight');
+  const llmWeightValue = document.getElementById('llmWeightValue');
+
+  llmToggle.addEventListener('change', () => {
+    llmConfig.style.display = llmToggle.checked ? 'flex' : 'none';
+    if (llmToggle.checked) checkLLMStatus();
+  });
+
+  llmWeightSlider.addEventListener('input', () => {
+    llmWeightValue.textContent = `${llmWeightSlider.value}%`;
+  });
+
   document.getElementById('saveSettings').addEventListener('click', saveSettings);
 }
 
@@ -256,12 +291,49 @@ function loadSettings() {
     if (settings.emailEnabled) {
       document.getElementById('emailConfig').style.display = 'flex';
     }
+
+    // LLM settings
+    document.getElementById('llmEnabled').checked = settings.llmEnabled === true;
+    const llmPct = Math.round((settings.llmWeight || 0.3) * 100);
+    document.getElementById('llmWeight').value = llmPct;
+    document.getElementById('llmWeightValue').textContent = `${llmPct}%`;
+    if (settings.llmEnabled) {
+      document.getElementById('llmConfig').style.display = 'flex';
+      checkLLMStatus();
+    }
+  });
+}
+
+function checkLLMStatus() {
+  const dot = document.getElementById('llmStatusDot');
+  const text = document.getElementById('llmStatusText');
+  dot.className = 'llm-status-dot checking';
+  text.textContent = 'Checking Ollama...';
+
+  const serverUrl = document.getElementById('serverUrl').value.trim() || 'http://localhost:3456';
+  chrome.runtime.sendMessage({ type: 'CHECK_LLM_STATUS', serverUrl }, (status) => {
+    if (chrome.runtime.lastError || !status) {
+      dot.className = 'llm-status-dot error';
+      text.textContent = 'Backend server unreachable';
+      return;
+    }
+    if (status.available && status.modelReady) {
+      dot.className = 'llm-status-dot connected';
+      text.textContent = `Connected — ${status.configuredModel}`;
+    } else if (status.available && !status.modelReady) {
+      dot.className = 'llm-status-dot error';
+      text.textContent = status.hint || `Model not found. Pull it in Ollama.`;
+    } else {
+      dot.className = 'llm-status-dot error';
+      text.textContent = status.hint || status.error || 'Ollama not available';
+    }
   });
 }
 
 function saveSettings() {
   const tfidfPct = parseInt(document.getElementById('tfidfWeight').value);
   const threshold = parseInt(document.getElementById('thresholdSlider').value);
+  const llmPct = parseInt(document.getElementById('llmWeight').value);
 
   const settings = {
     notificationsEnabled: document.getElementById('notificationsEnabled').checked,
@@ -277,6 +349,8 @@ function saveSettings() {
       tfidf: tfidfPct / 100,
       skills: (100 - tfidfPct) / 100,
     },
+    llmEnabled: document.getElementById('llmEnabled').checked,
+    llmWeight: llmPct / 100,
   };
 
   chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings });
