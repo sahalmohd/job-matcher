@@ -176,7 +176,10 @@ function loadResume() {
     const text = response?.text || '';
     document.getElementById('resumeText').value = text;
     if (text) {
-      updateStatus('Resume loaded');
+      const wordCount = text.split(/\s+/).filter(Boolean).length;
+      updateStatus(`Resume loaded (${wordCount} words)`);
+    } else {
+      updateStatus('No resume — upload one to start matching');
     }
   });
 }

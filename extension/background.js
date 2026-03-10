@@ -10,7 +10,7 @@ const STORAGE_KEYS = {
 };
 
 const DEFAULTS = {
-  threshold: 70,
+  threshold: 50,
   settings: {
     notificationsEnabled: true,
     emailEnabled: false,
@@ -26,8 +26,10 @@ const EMAIL_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
 // Listen for jobs from content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'JOBS_FOUND') {
-    handleJobsFound(message.jobs, message.source);
-    sendResponse({ status: 'ok' });
+    handleJobsFound(message.jobs, message.source).then(() => {
+      sendResponse({ status: 'ok' });
+    });
+    return true;
   }
 
   if (message.type === 'GET_MATCHES') {
@@ -124,10 +126,14 @@ async function handleJobsFound(jobs, source) {
 
   if (!settings.platforms[source]) return; // Platform disabled
 
-  const jobsWithDesc = jobs.filter((j) => j.description && j.description.length > 20);
-  if (jobsWithDesc.length === 0) return;
+  const jobsWithContent = jobs.filter((j) => {
+    const hasDesc = j.description && j.description.length > 20;
+    const hasMeta = j.title && j.title.length > 2;
+    return hasDesc || hasMeta;
+  });
+  if (jobsWithContent.length === 0) return;
 
-  const results = JobMatcher.matchJobs(resumeText, jobsWithDesc, threshold, settings.weights);
+  const results = JobMatcher.matchJobs(resumeText, jobsWithContent, threshold, settings.weights);
   if (results.length === 0) return;
 
   const existingMatches = await getStoredMatches();

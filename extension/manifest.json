@@ -27,7 +27,12 @@
   "options_page": "options/options.html",
   "content_scripts": [
     {
-      "matches": ["https://www.linkedin.com/jobs/*"],
+      "matches": [
+        "https://www.linkedin.com/jobs/*",
+        "https://www.linkedin.com/jobs/search/*",
+        "https://www.linkedin.com/jobs/view/*",
+        "https://www.linkedin.com/jobs/collections/*"
+      ],
       "js": ["content-scripts/linkedin.js"],
       "run_at": "document_idle"
     },

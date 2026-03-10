@@ -39,7 +39,8 @@ cd job-matcher
 
 1. Open Chrome and navigate to `chrome://extensions/`
 2. Enable **Developer mode** (top right)
-3. Click **Load unpacked** and select the `extension/` folder
+3. Click **Load unpacked** and select the **`extension/`** subfolder (not the project root!)
+   - Path: `job-matcher/extension/`
 4. The Job Matcher icon appears in your toolbar
 
 ### 2. Upload Your Resume
