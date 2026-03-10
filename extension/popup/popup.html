@@ -21,6 +21,7 @@
 
     <nav class="tabs">
       <button class="tab active" data-tab="dashboard">Matches</button>
+      <button class="tab" data-tab="search">Search</button>
       <button class="tab" data-tab="resume">Resume</button>
       <button class="tab" data-tab="settings">Settings</button>
     </nav>
@@ -39,6 +40,52 @@
           </svg>
           <p>No matches yet</p>
           <span>Upload your resume and browse jobs on LinkedIn, Indeed, or Glassdoor</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Search Tab -->
+    <section class="tab-content" id="tab-search">
+      <div class="search-section">
+        <div class="controls-bar">
+          <span class="match-count" id="profileCount">0 searches</span>
+          <button class="btn-text" id="toggleAddSearch">+ Add Search</button>
+        </div>
+
+        <div class="search-form" id="searchForm" style="display:none">
+          <input type="text" id="searchKeywords" class="input" placeholder="Keywords (e.g. React Developer)">
+          <input type="text" id="searchLocation" class="input" placeholder="Location (e.g. New York, Remote)">
+          <div class="search-form-row">
+            <select id="searchWorkType" class="input select">
+              <option value="any">Any Work Type</option>
+              <option value="remote">Remote</option>
+              <option value="onsite">On-site</option>
+              <option value="hybrid">Hybrid</option>
+            </select>
+            <select id="searchInterval" class="input select">
+              <option value="15">Every 15 min</option>
+              <option value="30">Every 30 min</option>
+              <option value="60" selected>Every 1 hour</option>
+              <option value="120">Every 2 hours</option>
+              <option value="240">Every 4 hours</option>
+              <option value="1440">Daily</option>
+            </select>
+          </div>
+          <div class="search-form-actions">
+            <button class="btn-primary" id="saveSearch">Save Search</button>
+            <button class="btn-secondary" id="cancelSearch">Cancel</button>
+          </div>
+        </div>
+
+        <div class="profiles-list" id="profilesList">
+          <div class="empty-state" id="searchEmptyState">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+              <path d="M12 8v4l3 3" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+              <circle cx="12" cy="12" r="9" stroke="#94A3B8" stroke-width="2"/>
+            </svg>
+            <p>No scheduled searches</p>
+            <span>Add a search to automatically find and score LinkedIn jobs on a schedule</span>
+          </div>
         </div>
       </div>
     </section>

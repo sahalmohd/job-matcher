@@ -6,7 +6,9 @@
   "permissions": [
     "storage",
     "notifications",
-    "activeTab"
+    "activeTab",
+    "alarms",
+    "tabs"
   ],
   "host_permissions": [
     "https://www.linkedin.com/*",

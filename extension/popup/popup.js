@@ -4,9 +4,11 @@ function init() {
   setupTabs();
   setupResume();
   setupSettings();
+  setupSearchTab();
   loadMatches();
   loadSettings();
   loadResume();
+  loadSearchProfiles();
 }
 
 // --- Tab Navigation ---
@@ -287,6 +289,214 @@ function saveSettings() {
     btn.textContent = 'Save Settings';
     btn.style.background = '';
   }, 1500);
+}
+
+// --- Search Profiles ---
+
+let searchProfiles = [];
+let editingProfileId = null;
+
+function setupSearchTab() {
+  document.getElementById('toggleAddSearch').addEventListener('click', () => {
+    const form = document.getElementById('searchForm');
+    const isVisible = form.style.display !== 'none';
+    if (isVisible) {
+      resetSearchForm();
+    } else {
+      form.style.display = 'flex';
+      document.getElementById('toggleAddSearch').textContent = 'Cancel';
+    }
+  });
+
+  document.getElementById('saveSearch').addEventListener('click', saveSearchProfile);
+
+  document.getElementById('cancelSearch').addEventListener('click', resetSearchForm);
+}
+
+function resetSearchForm() {
+  const form = document.getElementById('searchForm');
+  form.style.display = 'none';
+  document.getElementById('searchKeywords').value = '';
+  document.getElementById('searchLocation').value = '';
+  document.getElementById('searchWorkType').value = 'any';
+  document.getElementById('searchInterval').value = '60';
+  document.getElementById('toggleAddSearch').textContent = '+ Add Search';
+  editingProfileId = null;
+}
+
+function loadSearchProfiles() {
+  chrome.runtime.sendMessage({ type: 'GET_SEARCH_PROFILES' }, (response) => {
+    if (chrome.runtime.lastError) return;
+    searchProfiles = response?.profiles || [];
+    renderSearchProfiles();
+  });
+}
+
+function renderSearchProfiles() {
+  const list = document.getElementById('profilesList');
+  const countEl = document.getElementById('profileCount');
+  const emptyEl = document.getElementById('searchEmptyState');
+
+  countEl.textContent = `${searchProfiles.length} search${searchProfiles.length !== 1 ? 'es' : ''}`;
+
+  if (searchProfiles.length === 0) {
+    list.innerHTML = '';
+    list.appendChild(emptyEl);
+    emptyEl.style.display = 'flex';
+    return;
+  }
+
+  emptyEl.style.display = 'none';
+  list.innerHTML = '';
+
+  for (const profile of searchProfiles) {
+    list.appendChild(createProfileCard(profile));
+  }
+
+  // Fetch scan statuses to update UI
+  chrome.runtime.sendMessage({ type: 'GET_SCAN_STATUS' }, (statusMap) => {
+    if (chrome.runtime.lastError || !statusMap) return;
+    for (const profile of searchProfiles) {
+      const status = statusMap[profile.id];
+      const statusEl = document.querySelector(`[data-profile-status="${profile.id}"]`);
+      if (statusEl && status) {
+        if (status.state === 'scanning') {
+          statusEl.className = 'profile-status scanning';
+          statusEl.innerHTML = '<span class="scanning-spinner">&#8635;</span> Scanning...';
+        } else if (status.lastRun) {
+          statusEl.textContent = `Last: ${formatTimeAgo(status.lastRun)} (${status.jobsFound || 0} jobs)`;
+        }
+      }
+    }
+  });
+}
+
+function createProfileCard(profile) {
+  const card = document.createElement('div');
+  card.className = 'profile-card';
+
+  const workTypeLabel = { remote: 'Remote', onsite: 'On-site', hybrid: 'Hybrid', any: 'Any' }[profile.workType] || 'Any';
+  const intervalLabel = formatInterval(profile.interval);
+  const lastRun = profile.lastRun ? formatTimeAgo(profile.lastRun) : 'Never';
+
+  card.innerHTML = `
+    <div class="profile-card-header">
+      <span class="profile-keywords">${escapeHtml(profile.keywords || 'Untitled')}</span>
+      <label class="toggle" style="transform: scale(0.85)">
+        <input type="checkbox" data-profile-toggle="${profile.id}" ${profile.enabled ? 'checked' : ''}>
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="profile-card-meta">
+      ${profile.location ? `<span class="profile-tag">${escapeHtml(profile.location)}</span>` : ''}
+      <span class="profile-tag">${workTypeLabel}</span>
+      <span class="profile-tag">${intervalLabel}</span>
+    </div>
+    <div class="profile-card-footer">
+      <span class="profile-status" data-profile-status="${profile.id}">Last: ${lastRun}${profile.resultCount ? ` (${profile.resultCount} total)` : ''}</span>
+      <div class="profile-actions">
+        <button class="btn-icon run-now" data-run-profile="${profile.id}" title="Run now">
+          <svg viewBox="0 0 24 24" fill="none"><polygon points="5,3 19,12 5,21" fill="currentColor"/></svg>
+        </button>
+        <button class="btn-icon delete" data-delete-profile="${profile.id}" title="Delete">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Toggle enabled
+  card.querySelector(`[data-profile-toggle="${profile.id}"]`).addEventListener('change', (e) => {
+    profile.enabled = e.target.checked;
+    saveAllProfiles();
+  });
+
+  // Run now
+  card.querySelector(`[data-run-profile="${profile.id}"]`).addEventListener('click', () => {
+    runSearchNow(profile.id);
+  });
+
+  // Delete
+  card.querySelector(`[data-delete-profile="${profile.id}"]`).addEventListener('click', () => {
+    searchProfiles = searchProfiles.filter((p) => p.id !== profile.id);
+    saveAllProfiles();
+    renderSearchProfiles();
+  });
+
+  return card;
+}
+
+function saveSearchProfile() {
+  const keywords = document.getElementById('searchKeywords').value.trim();
+  const location = document.getElementById('searchLocation').value.trim();
+  const workType = document.getElementById('searchWorkType').value;
+  const interval = parseInt(document.getElementById('searchInterval').value);
+
+  if (!keywords) {
+    document.getElementById('searchKeywords').focus();
+    return;
+  }
+
+  if (editingProfileId) {
+    const idx = searchProfiles.findIndex((p) => p.id === editingProfileId);
+    if (idx !== -1) {
+      searchProfiles[idx] = { ...searchProfiles[idx], keywords, location, workType, interval };
+    }
+  } else {
+    searchProfiles.push({
+      id: generateId(),
+      keywords,
+      location,
+      workType,
+      interval,
+      enabled: true,
+      lastRun: null,
+      resultCount: 0,
+    });
+  }
+
+  saveAllProfiles();
+  renderSearchProfiles();
+  resetSearchForm();
+}
+
+function saveAllProfiles() {
+  chrome.runtime.sendMessage({
+    type: 'SAVE_SEARCH_PROFILES',
+    profiles: searchProfiles,
+  });
+}
+
+function runSearchNow(profileId) {
+  const statusEl = document.querySelector(`[data-profile-status="${profileId}"]`);
+  if (statusEl) {
+    statusEl.className = 'profile-status scanning';
+    statusEl.innerHTML = '<span class="scanning-spinner">&#8635;</span> Scanning...';
+  }
+
+  chrome.runtime.sendMessage({ type: 'RUN_SEARCH_NOW', profileId }, (result) => {
+    if (chrome.runtime.lastError) return;
+    loadSearchProfiles();
+    loadMatches();
+
+    if (result?.jobsFound > 0) {
+      updateStatus(`Found ${result.jobsFound} jobs`);
+    } else if (result?.error) {
+      updateStatus('Scan failed');
+    } else {
+      updateStatus('Scan complete — no new jobs');
+    }
+  });
+}
+
+function formatInterval(minutes) {
+  if (minutes < 60) return `Every ${minutes}m`;
+  if (minutes < 1440) return `Every ${minutes / 60}h`;
+  return 'Daily';
+}
+
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
 // --- Helpers ---

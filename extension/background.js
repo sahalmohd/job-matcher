@@ -7,7 +7,14 @@ const STORAGE_KEYS = {
   SETTINGS: 'settings',
   LAST_EMAIL_TIME: 'lastEmailTime',
   PENDING_EMAIL_MATCHES: 'pendingEmailMatches',
+  SEARCH_PROFILES: 'searchProfiles',
+  SCAN_STATUS: 'scanStatus',
 };
+
+const ALARM_PREFIX = 'search-profile-';
+const SCAN_TAB_MARKER = '_jm_scan=1';
+const SCAN_TIMEOUT_MS = 20000;
+const WORK_TYPE_MAP = { remote: '2', onsite: '1', hybrid: '3' };
 
 const DEFAULTS = {
   threshold: 50,
@@ -79,6 +86,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'SCORE_JOB') {
     scoreOneJob(message.job).then((result) => sendResponse(result));
+    return true;
+  }
+
+  if (message.type === 'GET_SEARCH_PROFILES') {
+    getSearchProfiles().then((profiles) => sendResponse({ profiles }));
+    return true;
+  }
+
+  if (message.type === 'SAVE_SEARCH_PROFILES') {
+    saveSearchProfiles(message.profiles).then(() => {
+      setupAlarms(message.profiles);
+      sendResponse({ status: 'ok' });
+    });
+    return true;
+  }
+
+  if (message.type === 'RUN_SEARCH_NOW') {
+    runScheduledScan(message.profileId).then((result) => sendResponse(result));
+    return true;
+  }
+
+  if (message.type === 'GET_SCAN_STATUS') {
+    getScanStatus().then((status) => sendResponse(status));
     return true;
   }
 });
@@ -278,3 +308,147 @@ async function persistToServer(matches, serverUrl) {
     // Server may not be running — fail silently
   }
 }
+
+// ============================================================
+// Scheduled Search Profiles
+// ============================================================
+
+async function getSearchProfiles() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(STORAGE_KEYS.SEARCH_PROFILES, (data) => {
+      resolve(data[STORAGE_KEYS.SEARCH_PROFILES] || []);
+    });
+  });
+}
+
+async function saveSearchProfiles(profiles) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ [STORAGE_KEYS.SEARCH_PROFILES]: profiles }, resolve);
+  });
+}
+
+async function getScanStatus() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(STORAGE_KEYS.SCAN_STATUS, (data) => {
+      resolve(data[STORAGE_KEYS.SCAN_STATUS] || {});
+    });
+  });
+}
+
+async function setScanStatus(profileId, status) {
+  const current = await getScanStatus();
+  current[profileId] = { ...status, updatedAt: new Date().toISOString() };
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ [STORAGE_KEYS.SCAN_STATUS]: current }, resolve);
+  });
+}
+
+function buildLinkedInSearchUrl(profile) {
+  const params = new URLSearchParams();
+  if (profile.keywords) params.set('keywords', profile.keywords);
+  if (profile.location) params.set('location', profile.location);
+  if (profile.workType && profile.workType !== 'any') {
+    const code = WORK_TYPE_MAP[profile.workType];
+    if (code) params.set('f_WT', code);
+  }
+  params.set('sortBy', 'DD');
+  params.set(SCAN_TAB_MARKER.split('=')[0], '1');
+  return `https://www.linkedin.com/jobs/search/?${params.toString()}`;
+}
+
+// Track pending scan-tab resolutions so the content script response can resolve them
+const pendingScanTabs = new Map();
+
+async function runScheduledScan(profileId) {
+  const profiles = await getSearchProfiles();
+  const profile = profiles.find((p) => p.id === profileId);
+  if (!profile) return { error: 'Profile not found' };
+
+  await setScanStatus(profileId, { state: 'scanning' });
+
+  const url = buildLinkedInSearchUrl(profile);
+
+  try {
+    const tab = await chrome.tabs.create({ url, active: false });
+
+    const jobs = await new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        pendingScanTabs.delete(tab.id);
+        resolve([]);
+      }, SCAN_TIMEOUT_MS);
+
+      pendingScanTabs.set(tab.id, { resolve, timeout });
+    });
+
+    // Close the background tab
+    try { await chrome.tabs.remove(tab.id); } catch {}
+
+    // Update profile stats
+    const freshProfiles = await getSearchProfiles();
+    const idx = freshProfiles.findIndex((p) => p.id === profileId);
+    if (idx !== -1) {
+      freshProfiles[idx].lastRun = new Date().toISOString();
+      freshProfiles[idx].resultCount = (freshProfiles[idx].resultCount || 0) + jobs.length;
+      await saveSearchProfiles(freshProfiles);
+    }
+
+    await setScanStatus(profileId, {
+      state: 'idle',
+      lastRun: new Date().toISOString(),
+      jobsFound: jobs.length,
+    });
+
+    return { status: 'ok', jobsFound: jobs.length };
+  } catch (err) {
+    await setScanStatus(profileId, { state: 'error', error: err.message });
+    return { error: err.message };
+  }
+}
+
+// Intercept JOBS_FOUND from scan tabs to resolve the pending promise
+// This wraps around the existing message handler — we detect scan tabs by checking pendingScanTabs
+const origHandleJobsFound = handleJobsFound;
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (message.type === 'JOBS_FOUND' && sender.tab && pendingScanTabs.has(sender.tab.id)) {
+    const pending = pendingScanTabs.get(sender.tab.id);
+    pendingScanTabs.delete(sender.tab.id);
+    clearTimeout(pending.timeout);
+    // Still run through matching pipeline normally, then resolve with the jobs
+    pending.resolve(message.jobs || []);
+  }
+});
+
+// ============================================================
+// Chrome Alarms — Scheduling
+// ============================================================
+
+async function setupAlarms(profiles) {
+  // Clear all existing search alarms
+  const allAlarms = await chrome.alarms.getAll();
+  for (const alarm of allAlarms) {
+    if (alarm.name.startsWith(ALARM_PREFIX)) {
+      await chrome.alarms.clear(alarm.name);
+    }
+  }
+
+  // Create alarms for enabled profiles
+  if (!profiles) profiles = await getSearchProfiles();
+  for (const profile of profiles) {
+    if (profile.enabled) {
+      const periodInMinutes = Math.max(profile.interval || 60, 15);
+      chrome.alarms.create(ALARM_PREFIX + profile.id, {
+        delayInMinutes: periodInMinutes,
+        periodInMinutes,
+      });
+    }
+  }
+}
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (!alarm.name.startsWith(ALARM_PREFIX)) return;
+  const profileId = alarm.name.slice(ALARM_PREFIX.length);
+  await runScheduledScan(profileId);
+});
+
+// Re-setup alarms on service worker startup
+setupAlarms();

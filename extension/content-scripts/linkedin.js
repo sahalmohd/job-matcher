@@ -3,6 +3,9 @@
   const seenJobs = new Set();
   let lastUrl = '';
 
+  // Detect if this tab was opened by the background scheduler
+  const isScheduledScan = new URLSearchParams(window.location.search).has('_jm_scan');
+
   function extractJobCards() {
     const jobs = [];
 
@@ -37,6 +40,16 @@
         card.querySelector('.artdeco-entity-lockup__caption') ||
         card.querySelector('.job-card-container__metadata-wrapper li');
 
+      // In scheduled scan mode, also grab any snippet text visible on the card
+      let snippet = '';
+      if (isScheduledScan) {
+        const snippetEl =
+          card.querySelector('.job-card-list__insight') ||
+          card.querySelector('.job-card-container__footer-wrapper') ||
+          card.querySelector('[class*="insight"]');
+        snippet = snippetEl?.textContent?.trim() || '';
+      }
+
       const title = titleEl?.textContent?.trim();
       const url = titleEl?.href || titleEl?.closest('a')?.href || card.querySelector('a')?.href;
       const company = companyEl?.textContent?.trim();
@@ -44,7 +57,14 @@
 
       if (title && url && !seenJobs.has(url)) {
         seenJobs.add(url);
-        jobs.push({ title, company, location, url, platform: 'linkedin' });
+        jobs.push({
+          title,
+          company,
+          location,
+          description: snippet,
+          url,
+          platform: 'linkedin',
+        });
       }
     }
 
@@ -52,7 +72,6 @@
   }
 
   function extractJobDetail() {
-    // Try multiple selectors for the job description panel — LinkedIn changes these often
     const descEl =
       document.querySelector('.jobs-description__content') ||
       document.querySelector('.jobs-description-content__text') ||
@@ -87,7 +106,6 @@
     const description = descEl.textContent?.trim() || '';
     if (description.length < 10) return null;
 
-    // Build URL: prefer the canonical job URL from the page
     let jobUrl = window.location.href;
     const canonLink = document.querySelector('link[rel="canonical"]');
     if (canonLink?.href) jobUrl = canonLink.href;
@@ -111,7 +129,7 @@
         jobs,
       });
     } catch {
-      // Extension context invalidated (e.g. after reload)
+      // Extension context invalidated
     }
   }
 
@@ -135,10 +153,58 @@
     sendJobs(jobs);
   }
 
-  // Detect when the detail panel content changes (user clicked a new job)
+  // ---- Scheduled scan mode: aggressive multi-pass extraction ----
+  if (isScheduledScan) {
+    let passes = 0;
+    const maxPasses = 5;
+    const passInterval = 2500;
+    const allJobs = [];
+
+    function scheduledPass() {
+      passes++;
+      const cards = extractJobCards();
+      const detail = extractJobDetail();
+
+      if (detail && detail.description) {
+        const key = detail.url || detail.title;
+        if (!seenJobs.has('detail:' + key)) {
+          seenJobs.add('detail:' + key);
+          allJobs.push(detail);
+        }
+      }
+
+      for (const card of cards) {
+        allJobs.push(card);
+      }
+
+      // Try scrolling to load more results
+      const listEl =
+        document.querySelector('.jobs-search-results-list') ||
+        document.querySelector('.scaffold-layout__list') ||
+        document.querySelector('[class*="jobs-search-results"]');
+      if (listEl) {
+        listEl.scrollTop = listEl.scrollHeight;
+      } else {
+        window.scrollTo(0, document.body.scrollHeight);
+      }
+
+      if (passes < maxPasses) {
+        setTimeout(scheduledPass, passInterval);
+      } else {
+        // Final send with all accumulated jobs
+        sendJobs(allJobs);
+      }
+    }
+
+    // Wait for the page to render, then start extracting
+    setTimeout(scheduledPass, 3000);
+    return;
+  }
+
+  // ---- Normal interactive mode ----
+
   function watchDetailPanel() {
     const observer = new MutationObserver(() => {
-      // Debounce: only extract after DOM settles
       clearTimeout(watchDetailPanel._timer);
       watchDetailPanel._timer = setTimeout(() => {
         const detail = extractJobDetail();
@@ -155,12 +221,10 @@
     observer.observe(document.body, { childList: true, subtree: true });
   }
 
-  // Detect SPA navigation (LinkedIn doesn't do full page reloads)
   function watchNavigation() {
     setInterval(() => {
       if (window.location.href !== lastUrl) {
         lastUrl = window.location.href;
-        // Reset detail tracking for new page context
         setTimeout(scan, 1000);
       }
     }, 1000);
@@ -169,7 +233,5 @@
   watchDetailPanel();
   watchNavigation();
   setInterval(scan, SCAN_INTERVAL);
-
-  // Initial scan with a small delay to let the page finish rendering
   setTimeout(scan, 1500);
 })();
