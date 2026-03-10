@@ -391,7 +391,10 @@ function updateScanStatuses() {
         statusEl.innerHTML = `<span style="color:var(--danger)">Error: ${escapeHtml(status.error || 'Unknown')}</span>`;
       } else if (status.lastRun) {
         const elapsed = status.elapsed ? ` in ${status.elapsed}s` : '';
-        statusEl.textContent = `Last: ${formatTimeAgo(status.lastRun)} — ${status.jobsFound || 0} jobs found${elapsed}`;
+        const matchInfo = status.matchCount != null
+          ? `${status.matchCount} matches from ${status.jobsFound || 0} jobs`
+          : `${status.jobsFound || 0} jobs found`;
+        statusEl.textContent = `Last: ${formatTimeAgo(status.lastRun)} — ${matchInfo}${elapsed}`;
       }
     }
 
@@ -519,12 +522,14 @@ function runSearchNow(profileId) {
     loadSearchProfiles();
     loadMatches();
 
-    if (result?.jobsFound > 0) {
-      updateStatus(`Found ${result.jobsFound} jobs in ${result.elapsed || '?'}s`);
+    if (result?.matchCount > 0) {
+      updateStatus(`${result.matchCount} matches from ${result.jobsFound} jobs (${result.elapsed}s)`);
+    } else if (result?.jobsFound > 0) {
+      updateStatus(`${result.jobsFound} jobs scraped, ${result.matchCount || 0} new matches (${result.elapsed}s)`);
     } else if (result?.error) {
       updateStatus('Scan failed');
     } else {
-      updateStatus('Scan complete — no new jobs');
+      updateStatus('Scan complete — no jobs found');
     }
   });
 }

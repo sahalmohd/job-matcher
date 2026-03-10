@@ -33,6 +33,11 @@ const EMAIL_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
 // Listen for jobs from content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'JOBS_FOUND') {
+    // Skip if this is from a scheduled scan tab — handleJobsFoundFromScan handles those
+    if (sender.tab && pendingScanTabs.has(sender.tab.id)) {
+      sendResponse({ status: 'ok' });
+      return;
+    }
     handleJobsFound(message.jobs, message.source).then(() => {
       sendResponse({ status: 'ok' });
     });
@@ -309,6 +314,78 @@ async function persistToServer(matches, serverUrl) {
   }
 }
 
+/**
+ * Variant of handleJobsFound specifically for scheduled scans.
+ * Uses a lower threshold for jobs lacking full descriptions (card-only results),
+ * and returns the number of matches saved.
+ */
+async function handleJobsFoundFromScan(jobs, source) {
+  const resumeText = await getResumeText();
+  if (!resumeText) return 0;
+
+  const { settings, threshold } = await getSettings();
+
+  const jobsWithContent = jobs.filter((j) => {
+    const hasDesc = j.description && j.description.length > 20;
+    const hasMeta = j.title && j.title.length > 2;
+    return hasDesc || hasMeta;
+  });
+  if (jobsWithContent.length === 0) return 0;
+
+  // For jobs with only title/company (no full description), use a much lower
+  // threshold since TF-IDF on short text produces low scores. We include all
+  // of them (threshold 0) and let the user see scores in the dashboard.
+  const scanThreshold = 0;
+  const results = JobMatcher.matchJobs(resumeText, jobsWithContent, scanThreshold, settings.weights);
+  if (results.length === 0) return 0;
+
+  const existingMatches = await getStoredMatches();
+  const existingUrls = new Set(existingMatches.map((m) => m.job.url));
+
+  const newMatches = results.filter((r) => !existingUrls.has(r.job.url));
+  if (newMatches.length === 0) return 0;
+
+  const timestamped = newMatches.map((m) => ({
+    ...m,
+    matchedAt: new Date().toISOString(),
+    fromScheduledScan: true,
+  }));
+
+  const allMatches = [...timestamped, ...existingMatches].slice(0, 200);
+  await saveMatches(allMatches);
+
+  // Notifications only for jobs above the user's configured threshold
+  const notifiable = newMatches.filter((m) => m.score >= threshold);
+  if (settings.notificationsEnabled && notifiable.length > 0) {
+    for (const match of notifiable.slice(0, 5)) {
+      showNotification(match);
+    }
+    if (notifiable.length > 5) {
+      showNotification({
+        job: { title: `+${notifiable.length - 5} more matches found` },
+        score: notifiable[notifiable.length - 1].score,
+      });
+    }
+  }
+
+  if (settings.emailEnabled && settings.emailAddress) {
+    const emailWorthy = newMatches.filter((m) => m.score >= threshold);
+    if (emailWorthy.length > 0) {
+      queueEmailNotification(emailWorthy, settings);
+    }
+  }
+
+  if (settings.serverUrl) {
+    persistToServer(newMatches, settings.serverUrl);
+  }
+
+  chrome.action.setBadgeText({ text: String(newMatches.length) });
+  chrome.action.setBadgeBackgroundColor({ color: '#10B981' });
+  setTimeout(() => chrome.action.setBadgeText({ text: '' }), 10000);
+
+  return newMatches.length;
+}
+
 // ============================================================
 // Scheduled Search Profiles
 // ============================================================
@@ -412,6 +489,9 @@ async function runScheduledScan(profileId) {
 
     try { await chrome.tabs.remove(tab.id); } catch {}
 
+    // Explicitly run scraped jobs through the matching pipeline
+    const matchCount = await handleJobsFoundFromScan(jobs, 'linkedin');
+
     const freshProfiles = await getSearchProfiles();
     const idx = freshProfiles.findIndex((p) => p.id === profileId);
     if (idx !== -1) {
@@ -425,11 +505,12 @@ async function runScheduledScan(profileId) {
       state: 'idle',
       lastRun: new Date().toISOString(),
       jobsFound: jobs.length,
+      matchCount,
       progress: 100,
       elapsed,
     });
 
-    return { status: 'ok', jobsFound: jobs.length, elapsed };
+    return { status: 'ok', jobsFound: jobs.length, matchCount, elapsed };
   } catch (err) {
     await setScanStatus(profileId, { state: 'error', error: err.message, progress: 0 });
     return { error: err.message };
