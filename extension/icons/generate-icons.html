@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head><title>Generate Icons</title></head>
+<body>
+  <canvas id="c16" width="16" height="16"></canvas>
+  <canvas id="c48" width="48" height="48"></canvas>
+  <canvas id="c128" width="128" height="128"></canvas>
+  <script>
+    function drawIcon(canvas) {
+      const s = canvas.width;
+      const ctx = canvas.getContext('2d');
+      const r = s * 0.2;
+
+      // Rounded rect background
+      ctx.beginPath();
+      ctx.moveTo(r, 0);
+      ctx.lineTo(s - r, 0);
+      ctx.quadraticCurveTo(s, 0, s, r);
+      ctx.lineTo(s, s - r);
+      ctx.quadraticCurveTo(s, s, s - r, s);
+      ctx.lineTo(r, s);
+      ctx.quadraticCurveTo(0, s, 0, s - r);
+      ctx.lineTo(0, r);
+      ctx.quadraticCurveTo(0, 0, r, 0);
+      ctx.fillStyle = '#6366F1';
+      ctx.fill();
+
+      // Lines icon
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineCap = 'round';
+      ctx.lineWidth = Math.max(s * 0.08, 1);
+      const pad = s * 0.25;
+      const gap = (s - 2 * pad) / 3;
+
+      ctx.beginPath();
+      ctx.moveTo(pad, pad + gap * 0.5);
+      ctx.lineTo(s - pad, pad + gap * 0.5);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(pad, pad + gap * 1.5);
+      ctx.lineTo(s * 0.6, pad + gap * 1.5);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(pad, pad + gap * 2.5);
+      ctx.lineTo(s * 0.7, pad + gap * 2.5);
+      ctx.stroke();
+
+      // Checkmark
+      ctx.strokeStyle = '#10B981';
+      ctx.lineWidth = Math.max(s * 0.1, 1.5);
+      const cx = s * 0.75, cy = s * 0.72;
+      const cs = s * 0.12;
+      ctx.beginPath();
+      ctx.moveTo(cx - cs, cy);
+      ctx.lineTo(cx - cs * 0.3, cy + cs * 0.7);
+      ctx.lineTo(cx + cs, cy - cs * 0.5);
+      ctx.stroke();
+    }
+
+    ['c16', 'c48', 'c128'].forEach(id => {
+      drawIcon(document.getElementById(id));
+    });
+
+    // Download links
+    document.querySelectorAll('canvas').forEach(c => {
+      const a = document.createElement('a');
+      a.href = c.toDataURL('image/png');
+      a.download = `icon-${c.width}.png`;
+      a.textContent = `Download ${c.width}x${c.width}`;
+      a.style.display = 'block';
+      document.body.appendChild(a);
+    });
+  </script>
+</body>
+</html>

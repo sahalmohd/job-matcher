@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Job Matcher</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <rect width="24" height="24" rx="6" fill="#6366F1"/>
+          <path d="M7 8h10M7 12h6M7 16h8" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <h1>Job Matcher</h1>
+      </div>
+      <div class="status" id="status"></div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="dashboard">Matches</button>
+      <button class="tab" data-tab="resume">Resume</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
+
+    <!-- Dashboard Tab -->
+    <section class="tab-content active" id="tab-dashboard">
+      <div class="controls-bar">
+        <span class="match-count" id="matchCount">0 matches</span>
+        <button class="btn-text" id="clearMatches">Clear All</button>
+      </div>
+      <div class="matches-list" id="matchesList">
+        <div class="empty-state" id="emptyState">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+            <circle cx="11" cy="11" r="7" stroke="#94A3B8" stroke-width="2"/>
+            <path d="M16 16l4 4" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <p>No matches yet</p>
+          <span>Upload your resume and browse jobs on LinkedIn, Indeed, or Glassdoor</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Resume Tab -->
+    <section class="tab-content" id="tab-resume">
+      <div class="resume-section">
+        <div class="upload-area" id="uploadArea">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+            <path d="M12 15V3m0 0l-4 4m4-4l4 4" stroke="#6366F1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 17l.621 2.485A2 2 0 004.561 21h14.878a2 2 0 001.94-1.515L22 17" stroke="#6366F1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <p>Drop your resume here or <span class="link">browse</span></p>
+          <span class="upload-hint">PDF, DOCX, or TXT</span>
+          <input type="file" id="fileInput" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" hidden>
+        </div>
+
+        <div class="divider"><span>or paste text</span></div>
+
+        <textarea id="resumeText" placeholder="Paste your resume text here..." rows="8"></textarea>
+
+        <div class="resume-actions">
+          <button class="btn-primary" id="saveResume">Save Resume</button>
+          <button class="btn-secondary" id="clearResume">Clear</button>
+        </div>
+
+        <div class="resume-status" id="resumeStatus"></div>
+      </div>
+    </section>
+
+    <!-- Settings Tab -->
+    <section class="tab-content" id="tab-settings">
+      <div class="settings-section">
+        <div class="setting-group">
+          <label class="setting-label">Score Threshold</label>
+          <div class="threshold-control">
+            <input type="range" id="thresholdSlider" min="0" max="100" value="70">
+            <span class="threshold-value" id="thresholdValue">70</span>
+          </div>
+          <span class="setting-hint">Jobs scoring below this won't trigger notifications</span>
+        </div>
+
+        <div class="setting-group">
+          <label class="setting-label">Scoring Weights</label>
+          <div class="weight-control">
+            <label>TF-IDF Similarity</label>
+            <input type="range" id="tfidfWeight" min="0" max="100" value="60">
+            <span class="weight-value" id="tfidfWeightValue">60%</span>
+          </div>
+          <div class="weight-control">
+            <label>Skill Match</label>
+            <input type="range" id="skillWeight" min="0" max="100" value="40">
+            <span class="weight-value" id="skillWeightValue">40%</span>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <label class="setting-label">Platforms</label>
+          <div class="toggle-row">
+            <span>LinkedIn</span>
+            <label class="toggle"><input type="checkbox" id="platformLinkedin" checked><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span>Indeed</span>
+            <label class="toggle"><input type="checkbox" id="platformIndeed" checked><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span>Glassdoor</span>
+            <label class="toggle"><input type="checkbox" id="platformGlassdoor" checked><span class="slider"></span></label>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <label class="setting-label">Notifications</label>
+          <div class="toggle-row">
+            <span>Browser notifications</span>
+            <label class="toggle"><input type="checkbox" id="notificationsEnabled" checked><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span>Email notifications</span>
+            <label class="toggle"><input type="checkbox" id="emailEnabled"><span class="slider"></span></label>
+          </div>
+          <div class="email-config" id="emailConfig" style="display:none">
+            <input type="email" id="emailAddress" placeholder="your@email.com" class="input">
+            <input type="text" id="serverUrl" placeholder="http://localhost:3456" class="input" value="http://localhost:3456">
+            <span class="setting-hint">Run the backend server for email support</span>
+          </div>
+        </div>
+
+        <button class="btn-primary" id="saveSettings" style="width:100%">Save Settings</button>
+      </div>
+    </section>
+  </div>
+
+  <script src="../lib/parser.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

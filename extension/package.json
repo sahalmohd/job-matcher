@@ -1,0 +1,16 @@
+{
+  "name": "job-matcher-extension",
+  "version": "1.0.0",
+  "description": "Chrome extension for matching jobs to your resume",
+  "private": true,
+  "dependencies": {
+    "mammoth": "^1.8.0",
+    "pdf-parse": "^1.1.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  },
+  "scripts": {
+    "build:parser": "esbuild lib/parser.js --bundle --outfile=lib/parser.bundle.js --format=iife --global-name=ResumeParser --platform=browser"
+  }
+}
