@@ -295,6 +295,7 @@ function saveSettings() {
 
 let searchProfiles = [];
 let editingProfileId = null;
+let scanPollTimer = null;
 
 function setupSearchTab() {
   document.getElementById('toggleAddSearch').addEventListener('click', () => {
@@ -343,6 +344,7 @@ function renderSearchProfiles() {
     list.innerHTML = '';
     list.appendChild(emptyEl);
     emptyEl.style.display = 'flex';
+    stopScanPolling();
     return;
   }
 
@@ -353,22 +355,64 @@ function renderSearchProfiles() {
     list.appendChild(createProfileCard(profile));
   }
 
-  // Fetch scan statuses to update UI
+  updateScanStatuses();
+}
+
+function updateScanStatuses() {
   chrome.runtime.sendMessage({ type: 'GET_SCAN_STATUS' }, (statusMap) => {
     if (chrome.runtime.lastError || !statusMap) return;
+
+    let anyScanning = false;
+
     for (const profile of searchProfiles) {
       const status = statusMap[profile.id];
       const statusEl = document.querySelector(`[data-profile-status="${profile.id}"]`);
-      if (statusEl && status) {
-        if (status.state === 'scanning') {
-          statusEl.className = 'profile-status scanning';
-          statusEl.innerHTML = '<span class="scanning-spinner">&#8635;</span> Scanning...';
-        } else if (status.lastRun) {
-          statusEl.textContent = `Last: ${formatTimeAgo(status.lastRun)} (${status.jobsFound || 0} jobs)`;
-        }
+      if (!statusEl || !status) continue;
+
+      if (status.state === 'scanning') {
+        anyScanning = true;
+        const pct = status.progress || 0;
+        const detail = status.detail || 'Scanning...';
+        const elapsed = status.startTime ? Math.round((Date.now() - new Date(status.startTime).getTime()) / 1000) : 0;
+        const jobsSoFar = status.jobsSoFar || 0;
+
+        statusEl.innerHTML = `
+          <div class="scan-progress">
+            <div class="progress-bar-track">
+              <div class="progress-bar-fill${pct === 0 ? ' indeterminate' : ''}" style="width:${Math.max(pct, 5)}%"></div>
+            </div>
+            <div class="scan-detail">
+              <span>${escapeHtml(detail)}${jobsSoFar > 0 ? ` (${jobsSoFar} jobs)` : ''}</span>
+              <span class="scan-elapsed">${elapsed}s</span>
+            </div>
+          </div>
+        `;
+      } else if (status.state === 'error') {
+        statusEl.innerHTML = `<span style="color:var(--danger)">Error: ${escapeHtml(status.error || 'Unknown')}</span>`;
+      } else if (status.lastRun) {
+        const elapsed = status.elapsed ? ` in ${status.elapsed}s` : '';
+        statusEl.textContent = `Last: ${formatTimeAgo(status.lastRun)} — ${status.jobsFound || 0} jobs found${elapsed}`;
       }
     }
+
+    if (anyScanning) {
+      startScanPolling();
+    } else {
+      stopScanPolling();
+    }
   });
+}
+
+function startScanPolling() {
+  if (scanPollTimer) return;
+  scanPollTimer = setInterval(updateScanStatuses, 1000);
+}
+
+function stopScanPolling() {
+  if (scanPollTimer) {
+    clearInterval(scanPollTimer);
+    scanPollTimer = null;
+  }
 }
 
 function createProfileCard(profile) {
@@ -377,7 +421,6 @@ function createProfileCard(profile) {
 
   const workTypeLabel = { remote: 'Remote', onsite: 'On-site', hybrid: 'Hybrid', any: 'Any' }[profile.workType] || 'Any';
   const intervalLabel = formatInterval(profile.interval);
-  const lastRun = profile.lastRun ? formatTimeAgo(profile.lastRun) : 'Never';
 
   card.innerHTML = `
     <div class="profile-card-header">
@@ -393,7 +436,7 @@ function createProfileCard(profile) {
       <span class="profile-tag">${intervalLabel}</span>
     </div>
     <div class="profile-card-footer">
-      <span class="profile-status" data-profile-status="${profile.id}">Last: ${lastRun}${profile.resultCount ? ` (${profile.resultCount} total)` : ''}</span>
+      <div class="profile-status" data-profile-status="${profile.id}">Idle</div>
       <div class="profile-actions">
         <button class="btn-icon run-now" data-run-profile="${profile.id}" title="Run now">
           <svg viewBox="0 0 24 24" fill="none"><polygon points="5,3 19,12 5,21" fill="currentColor"/></svg>
@@ -468,11 +511,8 @@ function saveAllProfiles() {
 }
 
 function runSearchNow(profileId) {
-  const statusEl = document.querySelector(`[data-profile-status="${profileId}"]`);
-  if (statusEl) {
-    statusEl.className = 'profile-status scanning';
-    statusEl.innerHTML = '<span class="scanning-spinner">&#8635;</span> Scanning...';
-  }
+  startScanPolling();
+  updateScanStatuses();
 
   chrome.runtime.sendMessage({ type: 'RUN_SEARCH_NOW', profileId }, (result) => {
     if (chrome.runtime.lastError) return;
@@ -480,7 +520,7 @@ function runSearchNow(profileId) {
     loadMatches();
 
     if (result?.jobsFound > 0) {
-      updateStatus(`Found ${result.jobsFound} jobs`);
+      updateStatus(`Found ${result.jobsFound} jobs in ${result.elapsed || '?'}s`);
     } else if (result?.error) {
       updateStatus('Scan failed');
     } else {

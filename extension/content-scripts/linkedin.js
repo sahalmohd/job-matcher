@@ -160,8 +160,23 @@
     const passInterval = 2500;
     const allJobs = [];
 
+    function reportProgress(step, detail) {
+      try {
+        chrome.runtime.sendMessage({
+          type: 'SCAN_PROGRESS',
+          step,
+          detail,
+          pass: passes,
+          maxPasses,
+          jobsSoFar: allJobs.length,
+        });
+      } catch {}
+    }
+
     function scheduledPass() {
       passes++;
+      reportProgress('extracting', `Pass ${passes}/${maxPasses} — scanning page`);
+
       const cards = extractJobCards();
       const detail = extractJobDetail();
 
@@ -177,7 +192,8 @@
         allJobs.push(card);
       }
 
-      // Try scrolling to load more results
+      reportProgress('scrolling', `Pass ${passes}/${maxPasses} — ${allJobs.length} jobs found, loading more`);
+
       const listEl =
         document.querySelector('.jobs-search-results-list') ||
         document.querySelector('.scaffold-layout__list') ||
@@ -191,12 +207,12 @@
       if (passes < maxPasses) {
         setTimeout(scheduledPass, passInterval);
       } else {
-        // Final send with all accumulated jobs
+        reportProgress('done', `Complete — ${allJobs.length} jobs extracted`);
         sendJobs(allJobs);
       }
     }
 
-    // Wait for the page to render, then start extracting
+    reportProgress('loading', 'Waiting for LinkedIn to load');
     setTimeout(scheduledPass, 3000);
     return;
   }

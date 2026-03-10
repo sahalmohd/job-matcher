@@ -359,31 +359,59 @@ function buildLinkedInSearchUrl(profile) {
 // Track pending scan-tab resolutions so the content script response can resolve them
 const pendingScanTabs = new Map();
 
+// Maps tab ID -> profile ID so we can route progress messages
+const scanTabToProfile = new Map();
+
 async function runScheduledScan(profileId) {
   const profiles = await getSearchProfiles();
   const profile = profiles.find((p) => p.id === profileId);
   if (!profile) return { error: 'Profile not found' };
 
-  await setScanStatus(profileId, { state: 'scanning' });
+  const startTime = Date.now();
+  await setScanStatus(profileId, {
+    state: 'scanning',
+    step: 'opening',
+    detail: 'Opening LinkedIn search',
+    progress: 0,
+    startTime,
+  });
 
   const url = buildLinkedInSearchUrl(profile);
 
   try {
     const tab = await chrome.tabs.create({ url, active: false });
+    scanTabToProfile.set(tab.id, profileId);
+
+    await setScanStatus(profileId, {
+      state: 'scanning',
+      step: 'loading',
+      detail: 'Waiting for page to load',
+      progress: 10,
+      startTime,
+    });
 
     const jobs = await new Promise((resolve) => {
       const timeout = setTimeout(() => {
         pendingScanTabs.delete(tab.id);
+        scanTabToProfile.delete(tab.id);
         resolve([]);
       }, SCAN_TIMEOUT_MS);
 
       pendingScanTabs.set(tab.id, { resolve, timeout });
     });
 
-    // Close the background tab
+    scanTabToProfile.delete(tab.id);
+
+    await setScanStatus(profileId, {
+      state: 'scanning',
+      step: 'scoring',
+      detail: `Scoring ${jobs.length} jobs against resume`,
+      progress: 85,
+      startTime,
+    });
+
     try { await chrome.tabs.remove(tab.id); } catch {}
 
-    // Update profile stats
     const freshProfiles = await getSearchProfiles();
     const idx = freshProfiles.findIndex((p) => p.id === profileId);
     if (idx !== -1) {
@@ -392,28 +420,45 @@ async function runScheduledScan(profileId) {
       await saveSearchProfiles(freshProfiles);
     }
 
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
     await setScanStatus(profileId, {
       state: 'idle',
       lastRun: new Date().toISOString(),
       jobsFound: jobs.length,
+      progress: 100,
+      elapsed,
     });
 
-    return { status: 'ok', jobsFound: jobs.length };
+    return { status: 'ok', jobsFound: jobs.length, elapsed };
   } catch (err) {
-    await setScanStatus(profileId, { state: 'error', error: err.message });
+    await setScanStatus(profileId, { state: 'error', error: err.message, progress: 0 });
     return { error: err.message };
   }
 }
 
-// Intercept JOBS_FOUND from scan tabs to resolve the pending promise
-// This wraps around the existing message handler — we detect scan tabs by checking pendingScanTabs
-const origHandleJobsFound = handleJobsFound;
+// Intercept messages from scan tabs for progress and job results
 chrome.runtime.onMessage.addListener((message, sender) => {
-  if (message.type === 'JOBS_FOUND' && sender.tab && pendingScanTabs.has(sender.tab.id)) {
-    const pending = pendingScanTabs.get(sender.tab.id);
-    pendingScanTabs.delete(sender.tab.id);
+  if (!sender.tab) return;
+  const tabId = sender.tab.id;
+
+  // Route progress updates to the correct profile's scan status
+  if (message.type === 'SCAN_PROGRESS' && scanTabToProfile.has(tabId)) {
+    const profileId = scanTabToProfile.get(tabId);
+    const progressPct = 10 + Math.round((message.pass / message.maxPasses) * 75);
+    setScanStatus(profileId, {
+      state: 'scanning',
+      step: message.step,
+      detail: message.detail,
+      progress: Math.min(progressPct, 85),
+      jobsSoFar: message.jobsSoFar,
+    });
+  }
+
+  // Resolve the pending promise when jobs arrive from scan tab
+  if (message.type === 'JOBS_FOUND' && pendingScanTabs.has(tabId)) {
+    const pending = pendingScanTabs.get(tabId);
+    pendingScanTabs.delete(tabId);
     clearTimeout(pending.timeout);
-    // Still run through matching pipeline normally, then resolve with the jobs
     pending.resolve(message.jobs || []);
   }
 });

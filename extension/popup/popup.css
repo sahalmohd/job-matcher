@@ -719,6 +719,48 @@ input[type="range"]::-webkit-slider-thumb {
   display: inline-block;
 }
 
+.scan-progress {
+  margin-top: 6px;
+}
+
+.progress-bar-track {
+  width: 100%;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+@keyframes progress-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.progress-bar-fill.indeterminate {
+  animation: progress-pulse 1.5s ease-in-out infinite;
+}
+
+.scan-detail {
+  font-size: 10px;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.scan-detail .scan-elapsed {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 4px;
