@@ -1,0 +1,168 @@
+{
+  "$comment": "Synthetic golden set that ships with the repo so `npm run eval` works on a fresh clone. Labels: 2 = would apply, 1 = maybe, 0 = irrelevant. Each case carries a `probes` list naming the failure mode it is designed to expose. Replace/extend with real scraped jobs via `node eval/seed.js` for numbers that reflect your own resume.",
+  "resumeFile": "resume.txt",
+  "jobs": [
+    {
+      "id": "ideal-data-platform",
+      "label": 2,
+      "probes": ["baseline"],
+      "title": "Senior Data Platform Engineer",
+      "company": "Stromfeld Data",
+      "location": "Berlin, Germany (Hybrid)",
+      "description": "We are looking for a Senior Data Platform Engineer to own our streaming ingestion layer. You will work in Python and Go building pipelines on Kafka and Flink, landing data in Apache Iceberg on S3. Our transformation layer is dbt on Snowflake. The platform runs on EKS, provisioned with Terraform and Helm, and we use Prometheus and Grafana for SLO monitoring. We expect 6+ years of experience, strong distributed systems fundamentals, and comfort owning production on-call. Nice to have: Airflow, OpenTelemetry, data contracts."
+    },
+    {
+      "id": "ideal-backend-payments",
+      "label": 2,
+      "probes": ["baseline"],
+      "title": "Staff Backend Engineer, Payments Infrastructure",
+      "company": "Litmus Financial",
+      "location": "Remote (EU)",
+      "description": "Join the team building our settlement platform. Stack is Python (FastAPI) and Go, PostgreSQL, Redis and Kafka, deployed to Kubernetes on AWS with Terraform. You will break apart a legacy Django monolith into gRPC microservices, own CI/CD, and drive observability with OpenTelemetry. We are looking for 7+ years of backend experience in a regulated or PCI environment, and someone who has mentored engineers. Strong SQL required."
+    },
+    {
+      "id": "good-sre-platform",
+      "label": 2,
+      "probes": ["baseline"],
+      "title": "Senior Site Reliability Engineer",
+      "company": "Halden Cloud",
+      "location": "Berlin or Remote",
+      "description": "SRE role owning our Kubernetes platform across AWS and GCP. Day to day: Terraform, Helm, ArgoCD, Prometheus, Grafana, and defining SLOs with product teams. You will write tooling in Go and Python and lead incident response. 5+ years operating production distributed systems required. Linux internals and container networking depth expected."
+    },
+    {
+      "id": "good-streaming-specialist",
+      "label": 2,
+      "probes": ["baseline"],
+      "title": "Streaming Data Engineer",
+      "company": "Wavelet Analytics",
+      "location": "Amsterdam, Netherlands",
+      "description": "Own our real-time event pipeline. You will build and operate Kafka and Flink jobs processing billions of events daily, model data with dbt into Snowflake, and orchestrate batch work with Airflow. Python primary, Scala or Java welcome. Experience with Parquet, Iceberg or Delta Lake and with schema evolution is important. Kubernetes and Terraform experience a plus."
+    },
+    {
+      "id": "maybe-junior-backend",
+      "label": 1,
+      "probes": ["seniority-mismatch"],
+      "title": "Junior Backend Engineer",
+      "company": "Stromfeld Data",
+      "location": "Berlin, Germany",
+      "description": "Graduate or early-career role on our backend team. You will work in Python with PostgreSQL and Redis, deploying to Kubernetes on AWS. We use Kafka for messaging and Terraform for infrastructure. This is an entry-level position: 0-2 years of experience. We provide mentoring and a structured onboarding programme. Strong computer science fundamentals matter more than tool experience."
+    },
+    {
+      "id": "maybe-ml-engineer",
+      "label": 1,
+      "probes": ["adjacent-domain"],
+      "title": "Machine Learning Engineer, Recommendations",
+      "company": "Vireo Media",
+      "location": "Remote (EU)",
+      "description": "Build and ship recommendation models. You will work in Python with PyTorch and scikit-learn, serve models on Kubernetes, and build feature pipelines on Spark and Airflow. We run on AWS with Terraform. Requires 5+ years and a strong grasp of deep learning, embeddings and A/B testing. Familiarity with Kafka for streaming features is useful."
+    },
+    {
+      "id": "maybe-eng-manager",
+      "label": 1,
+      "probes": ["role-type-mismatch"],
+      "title": "Engineering Manager, Data Platform",
+      "company": "Halden Cloud",
+      "location": "Berlin, Germany",
+      "description": "Lead a team of six engineers building our data platform. You will own roadmap, hiring, performance and delivery. The platform is Python and Go on Kubernetes, with Kafka, Airflow, dbt and Snowflake. We expect a former senior or staff engineer with 8+ years total experience who has mentored engineers and now wants to manage. This is a people-management role; you will not be writing production code day to day."
+    },
+    {
+      "id": "maybe-java-enterprise",
+      "label": 1,
+      "probes": ["stack-partial-overlap"],
+      "title": "Senior Java Backend Engineer",
+      "company": "Nordbank Systems",
+      "location": "Frankfurt, Germany (Onsite)",
+      "description": "Senior role on our core banking services. Stack is Java 17 and Spring Boot with Oracle and PostgreSQL, running on-premise with some GCP workloads and BigQuery reporting. You will work on transaction processing, gRPC service interfaces and Kafka event streams. 6+ years of Java required. Onsite five days a week in Frankfurt."
+    },
+    {
+      "id": "bad-frontend-react",
+      "label": 0,
+      "probes": ["superficial-tech-overlap"],
+      "title": "Senior Frontend Engineer",
+      "company": "Pixelworks Studio",
+      "location": "Remote (EU)",
+      "description": "Own our design system and web application. Deep React and TypeScript experience required, with Next.js, Redux, Tailwind CSS and Storybook. You will drive accessibility, Core Web Vitals performance and visual regression testing with Playwright. We deploy via GitLab CI to Kubernetes but you will not be writing backend code. 6+ years of frontend experience, strong CSS and design sensibility essential."
+    },
+    {
+      "id": "bad-ios-mobile",
+      "label": 0,
+      "probes": ["different-discipline"],
+      "title": "Senior iOS Engineer",
+      "company": "Vireo Media",
+      "location": "Berlin, Germany",
+      "description": "Build our iOS application in Swift and SwiftUI. You will own offline sync, push notifications, App Store releases and performance profiling in Instruments. Experience with Combine, Core Data and XCTest expected. 5+ years shipping iOS apps to the App Store. Our backend team works in Python but this role is mobile only."
+    },
+    {
+      "id": "bad-sales",
+      "label": 0,
+      "probes": ["different-field"],
+      "title": "Enterprise Account Executive, DACH",
+      "company": "Stromfeld Data",
+      "location": "Berlin, Germany",
+      "description": "Sell our data platform to enterprise accounts across Germany, Austria and Switzerland. You will own a EUR 3M quota, run the full sales cycle from prospecting to close, and work with solution engineers on technical evaluations. We look for 5+ years of enterprise SaaS sales experience, fluent German and English, and a track record of exceeding quota. Understanding of Kafka, Snowflake and cloud data architecture helps you speak credibly to engineering buyers."
+    },
+    {
+      "id": "bad-nursing",
+      "label": 0,
+      "probes": ["different-field"],
+      "title": "Registered Nurse, Intensive Care",
+      "company": "Charite Klinikum",
+      "location": "Berlin, Germany",
+      "description": "Registered nurse for our intensive care unit. You will deliver direct patient care, monitor ventilated patients, administer medication and coordinate with the consultant team on care plans. German nursing registration and C1 German required. Shift work including nights and weekends. 3+ years of ICU experience preferred."
+    },
+    {
+      "id": "bad-devops-windows",
+      "label": 0,
+      "probes": ["stack-mismatch"],
+      "title": "Windows Systems Administrator",
+      "company": "Nordbank Systems",
+      "location": "Frankfurt, Germany (Onsite)",
+      "description": "Administer our Windows Server estate and Active Directory forest. Responsibilities include Group Policy, Exchange, SCCM patching, PowerShell scripting and VMware vSphere capacity management. You will support 4000 desktop users. Requires 5+ years of Windows administration. No Linux or cloud work in this role."
+    },
+    {
+      "id": "sparse-good",
+      "label": 2,
+      "probes": ["sparse-posting-inflation"],
+      "title": "Backend Engineer (Python, Kafka)",
+      "company": "Kellner Labs",
+      "location": "Berlin, Germany",
+      "description": "Python and Kafka. Apply within."
+    },
+    {
+      "id": "sparse-bad",
+      "label": 0,
+      "probes": ["sparse-posting-inflation"],
+      "title": "Graphic Designer",
+      "company": "Kellner Labs",
+      "location": "Berlin, Germany",
+      "description": "Figma and Illustrator. Apply within."
+    },
+    {
+      "id": "symbol-skills-cpp",
+      "label": 1,
+      "probes": ["symbol-skill-extraction"],
+      "title": "Systems Engineer, C++ and .NET Interop",
+      "company": "Achse Industrie",
+      "location": "Munich, Germany",
+      "description": "Low-latency systems role. You will write C++ 20 for our pricing engine and maintain the C# / .NET interop layer that exposes it to desktop clients. Experience with F# is a bonus. We run on Linux with Docker and use Python for tooling and test automation. Requires 5+ years of systems programming, strong grasp of memory management and lock-free data structures."
+    },
+    {
+      "id": "no-description",
+      "label": 1,
+      "probes": ["missing-description"],
+      "title": "Senior Data Engineer",
+      "company": "Unbekannt GmbH",
+      "location": "Berlin, Germany",
+      "description": ""
+    },
+    {
+      "id": "keyword-stuffed-irrelevant",
+      "label": 0,
+      "probes": ["keyword-stuffing"],
+      "title": "Technical Recruiter, Engineering",
+      "company": "Talentbrucke",
+      "location": "Berlin, Germany",
+      "description": "Recruit engineers for our clients. You will source and screen candidates for roles involving Python, Go, Java, Kafka, Kubernetes, AWS, Terraform, PostgreSQL, Redis, Snowflake, Airflow, dbt, Spark, Docker, Prometheus, Grafana, gRPC and microservices. You do not need to write code, but you must be able to hold a credible conversation about these technologies and distributed systems architecture. 3+ years of technical recruiting experience required, agency or in-house."
+    }
+  ]
+}

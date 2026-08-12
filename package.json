@@ -1,0 +1,11 @@
+{
+  "name": "job-matcher",
+  "version": "1.0.0",
+  "description": "Chrome extension that matches LinkedIn jobs against your resume",
+  "private": true,
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "eval": "node eval/run.js",
+    "eval:detail": "node eval/run.js --detail current"
+  }
+}

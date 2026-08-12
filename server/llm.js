@@ -33,30 +33,87 @@ Respond with ONLY this JSON structure (no other text):
   ];
 }
 
-function parseResponse(text) {
-  const trimmed = text.trim();
+/**
+ * Find the first complete top-level JSON object in a string.
+ *
+ * The previous implementation used /\{[\s\S]*?\}/ — non-greedy, so it stopped
+ * at the FIRST closing brace. Any nested object in the reply (which the rubric
+ * response format now always contains) was truncated to invalid JSON and the
+ * whole score was discarded. This tracks brace depth instead, and skips braces
+ * that appear inside string literals.
+ */
+function extractJsonObject(text) {
+  const start = text.indexOf('{');
+  if (start < 0) return null;
 
-  // Try direct parse
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+
+  return null;
+}
+
+function parseResponse(text) {
+  // Strip markdown fences the model adds despite being told not to.
+  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+
   try {
     return validateResponse(JSON.parse(trimmed));
   } catch {}
 
-  // Extract JSON from markdown code blocks or surrounding text
-  const jsonMatch = trimmed.match(/\{[\s\S]*?\}/);
-  if (jsonMatch) {
+  const candidate = extractJsonObject(trimmed);
+  if (candidate) {
     try {
-      return validateResponse(JSON.parse(jsonMatch[0]));
+      return validateResponse(JSON.parse(candidate));
     } catch {}
   }
 
   return null;
 }
 
+/**
+ * Returns the validated object, or null if the model did not supply a usable
+ * numeric score.
+ *
+ * This previously coerced a non-numeric score to 0 via `Number(x) || 0`, which
+ * turned a parse failure into a confident "0% match" that then got blended into
+ * the hybrid score. A missing score has to stay missing so callers can skip it.
+ */
 function validateResponse(obj) {
-  if (typeof obj.score !== 'number' || obj.score < 0 || obj.score > 100) {
-    obj.score = Math.max(0, Math.min(100, Number(obj.score) || 0));
-  }
-  obj.score = Math.round(obj.score * 100) / 100;
+  if (!obj || typeof obj !== 'object') return null;
+
+  // Number(null) and Number('') are both 0, so a missing score would otherwise
+  // slip through the finite check as a confident zero.
+  if (obj.score == null || obj.score === '' || typeof obj.score === 'boolean') return null;
+
+  const score = Number(obj.score);
+  if (!Number.isFinite(score)) return null;
+
+  obj.score = Math.round(Math.max(0, Math.min(100, score)) * 100) / 100;
   obj.rationale = String(obj.rationale || '').slice(0, 500);
   obj.keyStrengths = Array.isArray(obj.keyStrengths)
     ? obj.keyStrengths.map(String).slice(0, 5)
@@ -144,4 +201,12 @@ async function checkOllamaHealth() {
   }
 }
 
-module.exports = { scoreWithLLM, checkOllamaHealth, OLLAMA_MODEL };
+module.exports = {
+  scoreWithLLM,
+  checkOllamaHealth,
+  OLLAMA_MODEL,
+  // Exported for tests.
+  parseResponse,
+  extractJsonObject,
+  validateResponse,
+};

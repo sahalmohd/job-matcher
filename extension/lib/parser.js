@@ -35,33 +35,43 @@ const ResumeParser = (() => {
   }
 
   async function parsePDF(buffer) {
+    // Use pdf.js if available (loaded in popup.html)
+    if (typeof pdfjsLib !== 'undefined') {
+      return parsePDFWithPdfJs(buffer);
+    }
+    // Fallback: lightweight regex extraction
     const uint8 = new Uint8Array(buffer);
-    const text = extractPDFText(uint8);
+    const text = extractPDFTextFallback(uint8);
     return normalizeText(text);
   }
 
-  /**
-   * Lightweight PDF text extraction without external dependencies.
-   * Handles the most common PDF text encodings found in resumes.
-   */
-  function extractPDFText(uint8) {
+  async function parsePDFWithPdfJs(buffer) {
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+    const pages = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const strings = content.items.map((item) => item.str);
+      pages.push(strings.join(' '));
+    }
+    return normalizeText(pages.join('\n'));
+  }
+
+  function extractPDFTextFallback(uint8) {
     const raw = new TextDecoder('latin1').decode(uint8);
     const textSegments = [];
 
-    // Extract text from BT...ET blocks (PDF text objects)
     const btEtRegex = /BT\s([\s\S]*?)ET/g;
     let btMatch;
     while ((btMatch = btEtRegex.exec(raw)) !== null) {
       const block = btMatch[1];
 
-      // Match Tj (show string) and TJ (show array of strings) operators
       const tjRegex = /\(([^)]*)\)\s*Tj/g;
       let tjMatch;
       while ((tjMatch = tjRegex.exec(block)) !== null) {
         textSegments.push(decodePDFString(tjMatch[1]));
       }
 
-      // TJ arrays: [(text) kerning (text) ...]
       const tjArrayRegex = /\[((?:[^]]*?))\]\s*TJ/g;
       let arrMatch;
       while ((arrMatch = tjArrayRegex.exec(block)) !== null) {
@@ -74,7 +84,6 @@ const ResumeParser = (() => {
       }
     }
 
-    // Also grab stream-based text that may contain readable strings
     if (textSegments.length === 0) {
       const readable = raw.match(/[\x20-\x7E]{4,}/g) || [];
       const filtered = readable.filter(
@@ -97,8 +106,7 @@ const ResumeParser = (() => {
   }
 
   async function parseDOCX(buffer) {
-    const entries = parseZip(new Uint8Array(buffer));
-    const docXml = entries['word/document.xml'];
+    const docXml = await readZipEntry(new Uint8Array(buffer), 'word/document.xml');
     if (!docXml) {
       throw new Error('Invalid DOCX: word/document.xml not found');
     }
@@ -108,59 +116,91 @@ const ResumeParser = (() => {
   }
 
   /**
-   * Minimal ZIP parser to extract entries from a DOCX file.
-   * DOCX is a ZIP archive containing XML files.
+   * Read one entry out of a ZIP archive as text. DOCX is a ZIP of XML parts.
+   *
+   * Entries are located through the central directory rather than by walking
+   * local file headers. Word sets the general-purpose "data descriptor" flag
+   * (bit 3), which leaves the compressed and uncompressed sizes as zero in the
+   * local header and writes them *after* the data instead — so a local-header
+   * walk reads a zero-length body and then desynchronises. The central
+   * directory always carries the true sizes.
    */
-  function parseZip(uint8) {
-    const entries = {};
+  async function readZipEntry(uint8, wantedName) {
     const view = new DataView(uint8.buffer, uint8.byteOffset, uint8.byteLength);
-    let offset = 0;
-
-    while (offset < uint8.length - 4) {
-      const sig = view.getUint32(offset, true);
-      if (sig !== 0x04034b50) break; // Local file header signature
-
-      const compMethod = view.getUint16(offset + 8, true);
-      const compSize = view.getUint32(offset + 18, true);
-      const uncompSize = view.getUint32(offset + 22, true);
-      const nameLen = view.getUint16(offset + 26, true);
-      const extraLen = view.getUint16(offset + 28, true);
-
-      const nameBytes = uint8.slice(offset + 30, offset + 30 + nameLen);
-      const name = new TextDecoder().decode(nameBytes);
-
-      const dataStart = offset + 30 + nameLen + extraLen;
-      const dataBytes = uint8.slice(dataStart, dataStart + compSize);
-
-      if (compMethod === 0 && name.endsWith('.xml')) {
-        entries[name] = new TextDecoder().decode(dataBytes);
-      } else if (compMethod === 8 && name.endsWith('.xml')) {
-        try {
-          const decompressed = decompressDeflateRaw(dataBytes);
-          entries[name] = new TextDecoder().decode(decompressed);
-        } catch {
-          // Skip entries we can't decompress
-        }
-      }
-
-      offset = dataStart + compSize;
+    const eocdOffset = findEndOfCentralDirectory(view, uint8.length);
+    if (eocdOffset < 0) {
+      throw new Error('Invalid DOCX: not a ZIP archive (no end-of-central-directory record)');
     }
 
-    return entries;
+    const entryCount = view.getUint16(eocdOffset + 10, true);
+    let offset = view.getUint32(eocdOffset + 16, true);
+
+    for (let i = 0; i < entryCount; i++) {
+      if (offset + 46 > uint8.length) break;
+      if (view.getUint32(offset, true) !== 0x02014b50) break; // Central directory header
+
+      const compMethod = view.getUint16(offset + 10, true);
+      const compSize = view.getUint32(offset + 20, true);
+      const nameLen = view.getUint16(offset + 28, true);
+      const extraLen = view.getUint16(offset + 30, true);
+      const commentLen = view.getUint16(offset + 32, true);
+      const localOffset = view.getUint32(offset + 42, true);
+
+      const name = new TextDecoder().decode(uint8.subarray(offset + 46, offset + 46 + nameLen));
+
+      if (name === wantedName) {
+        return decodeZipEntry(uint8, view, localOffset, compMethod, compSize, name);
+      }
+
+      offset += 46 + nameLen + extraLen + commentLen;
+    }
+
+    return null;
+  }
+
+  /** Read and decompress a single entry given its central-directory metadata. */
+  async function decodeZipEntry(uint8, view, localOffset, compMethod, compSize, name) {
+    if (view.getUint32(localOffset, true) !== 0x04034b50) {
+      throw new Error(`Invalid DOCX: bad local header for ${name}`);
+    }
+
+    // The local header's own name/extra lengths are authoritative for locating
+    // the data; the extra field often differs in length from the central one.
+    const nameLen = view.getUint16(localOffset + 26, true);
+    const extraLen = view.getUint16(localOffset + 28, true);
+    const dataStart = localOffset + 30 + nameLen + extraLen;
+    const data = uint8.subarray(dataStart, dataStart + compSize);
+
+    if (compMethod === 0) return new TextDecoder().decode(data);
+
+    if (compMethod !== 8) {
+      throw new Error(`Unsupported DOCX compression method ${compMethod} for ${name}`);
+    }
+
+    if (typeof DecompressionStream === 'undefined') {
+      throw new Error('Cannot read DOCX: DecompressionStream is unavailable in this browser');
+    }
+
+    // This await is the whole point. The previous code called an async
+    // decompressor synchronously and handed the resulting Promise to
+    // TextDecoder.decode(), which threw a TypeError that an empty catch then
+    // swallowed — so every DOCX failed with a misleading "document.xml not
+    // found".
+    const decompressed = await decompressWithStream(data);
+    return new TextDecoder().decode(decompressed);
   }
 
   /**
-   * Decompress raw DEFLATE data using the browser's DecompressionStream API.
-   * Falls back to a simple extraction if DecompressionStream is unavailable.
+   * Locate the end-of-central-directory record by scanning backwards for its
+   * signature. It sits at the very end of the file unless there is a trailing
+   * comment, which is capped at 64KB.
    */
-  function decompressDeflateRaw(compressed) {
-    if (typeof DecompressionStream !== 'undefined') {
-      // Use async decompression — we'll handle this via a sync wrapper
-      // since we need the ZIP parsing to be sequential
-      return decompressWithStream(compressed);
+  function findEndOfCentralDirectory(view, length) {
+    const minOffset = Math.max(0, length - 0xffff - 22);
+    for (let i = length - 22; i >= minOffset; i--) {
+      if (view.getUint32(i, true) === 0x06054b50) return i;
     }
-    // Fallback: try to decode as-is (works for stored/uncompressed entries)
-    return compressed;
+    return -1;
   }
 
   async function decompressWithStream(compressed) {

@@ -3,6 +3,10 @@ const { scoreWithLLM, checkOllamaHealth } = require('../llm');
 
 const router = express.Router();
 
+// Reported back to the client so it can detect a mismatch with its own limit
+// instead of the two silently drifting apart.
+const BATCH_LIMIT = Number(process.env.LLM_BATCH_LIMIT || 10);
+
 router.post('/score', async (req, res) => {
   try {
     const { resumeText, job } = req.body;
@@ -36,16 +40,23 @@ router.post('/score-batch', async (req, res) => {
       return res.status(400).json({ error: 'jobs array is required' });
     }
 
-    const capped = jobs.slice(0, 10);
+    const capped = jobs.slice(0, BATCH_LIMIT);
     const results = [];
 
-    for (const job of capped) {
+    for (let i = 0; i < capped.length; i++) {
+      const job = capped[i];
+      // Echo the caller's identifier so results are matched by id rather than
+      // by array position, which silently misattributed scores whenever the
+      // client's batch limit and this one diverged.
+      const _jmId = job._jmId ?? `idx-${i}`;
+
       try {
         const result = await scoreWithLLM(resumeText, job);
-        results.push({ job, ...result });
+        results.push({ _jmId, title: job.title, ...result });
       } catch (err) {
         results.push({
-          job,
+          _jmId,
+          title: job.title,
           score: null,
           error: err.message,
           rationale: null,
@@ -55,7 +66,7 @@ router.post('/score-batch', async (req, res) => {
       }
     }
 
-    res.json({ results, processedCount: results.length });
+    res.json({ results, processedCount: results.length, batchLimit: BATCH_LIMIT });
   } catch (err) {
     console.error('LLM batch score error:', err.message);
     res.status(502).json({ error: 'LLM batch scoring failed', detail: err.message });

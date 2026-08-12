@@ -30,7 +30,11 @@
     <section class="tab-content active" id="tab-dashboard">
       <div class="controls-bar">
         <span class="match-count" id="matchCount">0 matches</span>
-        <button class="btn-text" id="clearMatches">Clear All</button>
+        <div class="controls-bar-actions">
+          <button class="btn-text" id="rescoreMatches">Re-score</button>
+          <button class="btn-text" id="debugDump">Debug</button>
+          <button class="btn-text" id="clearMatches">Clear All</button>
+        </div>
       </div>
       <div class="matches-list" id="matchesList">
         <div class="empty-state" id="emptyState">
@@ -72,8 +76,8 @@
             </select>
           </div>
           <div class="search-form-actions">
-            <button class="btn-primary" id="saveSearch">Save Search</button>
-            <button class="btn-secondary" id="cancelSearch">Cancel</button>
+            <button type="button" class="btn-primary" id="saveSearch">Save Search</button>
+            <button type="button" class="btn-secondary" id="cancelSearch">Cancel</button>
           </div>
         </div>
 
@@ -131,14 +135,14 @@
         <div class="setting-group">
           <label class="setting-label">Scoring Weights</label>
           <div class="weight-control">
-            <label>TF-IDF Similarity</label>
-            <input type="range" id="tfidfWeight" min="0" max="100" value="60">
-            <span class="weight-value" id="tfidfWeightValue">60%</span>
+            <label>Text Similarity</label>
+            <input type="range" id="tfidfWeight" min="0" max="100" value="55">
+            <span class="weight-value" id="tfidfWeightValue">55%</span>
           </div>
           <div class="weight-control">
             <label>Skill Match</label>
-            <input type="range" id="skillWeight" min="0" max="100" value="40">
-            <span class="weight-value" id="skillWeightValue">40%</span>
+            <input type="range" id="skillWeight" min="0" max="100" value="45">
+            <span class="weight-value" id="skillWeightValue">45%</span>
           </div>
         </div>
 
@@ -200,6 +204,12 @@
     </section>
   </div>
 
+  <script src="../lib/pdf.min.js"></script>
+  <script>
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = '../lib/pdf.worker.min.js';
+    }
+  </script>
   <script src="../lib/parser.js"></script>
   <script src="popup.js"></script>
 </body>

@@ -1,0 +1,50 @@
+SAMIRA OKONKWO
+Senior Backend / Data Platform Engineer
+samira.okonkwo@example.com | Berlin, Germany | github.com/example
+
+SUMMARY
+Backend engineer with 8 years building high-throughput data platforms and
+distributed services. Deep experience with Python and Go, streaming pipelines on
+Kafka, and running production Kubernetes on AWS. I have led two platform
+migrations end to end and mentored four engineers to senior level.
+
+EXPERIENCE
+
+Staff Engineer, Datalith GmbH (2021 - present)
+- Designed and shipped an event-driven ingestion platform processing 4B events
+  per day using Kafka, Flink and Apache Iceberg on S3.
+- Migrated 60+ batch jobs from Airflow 1 to Airflow 2, cutting pipeline runtime
+  by 45% and on-call pages by two thirds.
+- Built the company's dbt + Snowflake modelling layer and the data contracts
+  that guard it; owned the Great Expectations test suite.
+- Ran the Kubernetes platform (EKS) with Terraform, Helm and ArgoCD. Introduced
+  Prometheus and Grafana SLO dashboards for 30 services.
+- Languages: Python (primary), Go, SQL. Wrote the Go service mesh sidecar
+  controller still used in production.
+
+Senior Backend Engineer, Kestrel Payments (2018 - 2021)
+- Built PCI-compliant payment settlement services in Python (FastAPI) and Go,
+  handling EUR 200M annual volume with PostgreSQL and Redis.
+- Broke a Django monolith into eight microservices communicating over gRPC and
+  Kafka; introduced OpenTelemetry tracing across all of them.
+- Owned the CI/CD platform: GitLab CI, Docker, canary deploys, automated
+  rollback. Reduced deploy lead time from 5 days to 40 minutes.
+
+Backend Engineer, Nordwind Logistics (2016 - 2018)
+- Java and Spring Boot route-optimisation services on GCP with BigQuery.
+- Wrote the geospatial matching engine (PostGIS) behind dynamic dispatch.
+
+SKILLS
+Languages: Python, Go, SQL, Java, Bash, some TypeScript
+Data: Kafka, Flink, Spark, Airflow, dbt, Snowflake, BigQuery, Iceberg, Parquet
+Infrastructure: AWS, GCP, Kubernetes, Docker, Terraform, Helm, ArgoCD, Linux
+Databases: PostgreSQL, Redis, DynamoDB, Elasticsearch, Cassandra
+Practices: distributed systems design, event-driven architecture, system design,
+observability, SLOs, incident response, TDD, code review, mentoring
+Testing: pytest, testcontainers, k6 load testing
+
+EDUCATION
+MSc Computer Science, TU Berlin (2016). Thesis on stream-processing watermarks.
+
+LANGUAGES
+English (fluent), German (C1), Igbo (native)

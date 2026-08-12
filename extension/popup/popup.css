@@ -118,6 +118,12 @@ body {
   margin-bottom: 10px;
 }
 
+.controls-bar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .match-count {
   font-size: 12px;
   color: var(--text-secondary);
@@ -764,6 +770,11 @@ input[type="range"]::-webkit-slider-thumb {
 
 .btn-icon.run-now:hover {
   background: rgba(99, 102, 241, 0.15);
+}
+
+.btn-icon.edit:hover {
+  color: var(--primary);
+  background: rgba(99, 102, 241, 0.1);
 }
 
 .btn-icon.delete:hover {

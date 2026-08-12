@@ -21,35 +21,55 @@ function setupTabs() {
       document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
       tab.classList.add('active');
       document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
+      if (tab.dataset.tab === 'dashboard') loadMatches();
     });
   });
+}
+
+function switchToTab(tabName) {
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach((t) => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
+  const target = document.querySelector(`.tab[data-tab="${tabName}"]`);
+  if (target) target.classList.add('active');
+  const content = document.getElementById(`tab-${tabName}`);
+  if (content) content.classList.add('active');
 }
 
 // --- Matches Dashboard ---
 
 function loadMatches() {
   chrome.runtime.sendMessage({ type: 'GET_MATCHES' }, (response) => {
-    if (chrome.runtime.lastError) return;
-    renderMatches(response?.matches || []);
+    if (chrome.runtime.lastError) {
+      console.warn('loadMatches error:', chrome.runtime.lastError.message);
+      return;
+    }
+    const matches = response?.matches || [];
+    renderMatches(matches);
   });
 }
 
 function renderMatches(matches) {
   const list = document.getElementById('matchesList');
   const countEl = document.getElementById('matchCount');
-  const emptyEl = document.getElementById('emptyState');
 
   countEl.textContent = `${matches.length} match${matches.length !== 1 ? 'es' : ''}`;
 
+  list.innerHTML = '';
+
   if (matches.length === 0) {
-    list.innerHTML = '';
-    list.appendChild(emptyEl);
-    emptyEl.style.display = 'flex';
+    list.innerHTML = `
+      <div class="empty-state" style="display:flex">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+          <circle cx="11" cy="11" r="7" stroke="#94A3B8" stroke-width="2"/>
+          <path d="M16 16l4 4" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <p>No matches yet</p>
+        <span>Upload your resume and browse jobs on LinkedIn, Indeed, or Glassdoor</span>
+      </div>
+    `;
     return;
   }
-
-  emptyEl.style.display = 'none';
-  list.innerHTML = '';
 
   for (const match of matches) {
     const card = createMatchCard(match);
@@ -119,6 +139,65 @@ function createMatchCard(match) {
 document.getElementById('clearMatches').addEventListener('click', () => {
   chrome.runtime.sendMessage({ type: 'CLEAR_MATCHES' }, () => {
     loadMatches();
+  });
+});
+
+document.getElementById('rescoreMatches')?.addEventListener('click', () => {
+  const btn = document.getElementById('rescoreMatches');
+  btn.textContent = 'Scoring...';
+  btn.disabled = true;
+  updateStatus('Re-scoring matches...');
+  try {
+    chrome.runtime.sendMessage({ type: 'RESCORE_ALL' }, (response) => {
+      btn.textContent = 'Re-score';
+      btn.disabled = false;
+      if (chrome.runtime.lastError) {
+        updateStatus('Error: ' + chrome.runtime.lastError.message);
+        return;
+      }
+      if (!response) {
+        updateStatus('No response from background worker');
+        return;
+      }
+      if (response.error) {
+        updateStatus('Error: ' + response.error);
+      } else {
+        updateStatus(`${response.updated} matches re-scored`);
+        loadMatches();
+      }
+    });
+  } catch (err) {
+    btn.textContent = 'Re-score';
+    btn.disabled = false;
+    updateStatus('Error: ' + err.message);
+  }
+});
+
+document.getElementById('debugDump')?.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'DEBUG_DUMP' }, (response) => {
+    if (chrome.runtime.lastError) {
+      alert('Error: ' + chrome.runtime.lastError.message);
+      return;
+    }
+    if (!response) {
+      alert('No response from background worker');
+      return;
+    }
+    const lines = [
+      `Resume: ${response.resumeLength} chars`,
+      `Weights: ${JSON.stringify(response.weights)}`,
+      `Matches: ${response.matchCount}`,
+      '',
+    ];
+    for (const m of response.matches) {
+      lines.push(`--- ${m.title} ---`);
+      lines.push(`  company: ${m.company}`);
+      lines.push(`  desc: ${m.descLength} chars → "${m.descPreview}"`);
+      lines.push(`  score: ${m.score}% | lexical: ${m.lexicalScore} | skill: ${m.skillScore}`);
+      lines.push(`  hasJobObject: ${m.hasJobObject}`);
+      lines.push(`  url: ${m.url}`);
+    }
+    alert(lines.join('\n'));
   });
 });
 
@@ -273,7 +352,10 @@ function loadSettings() {
     document.getElementById('thresholdSlider').value = threshold;
     document.getElementById('thresholdValue').textContent = threshold;
 
-    const tfidfPct = Math.round((settings.weights?.tfidf || 0.6) * 100);
+    // `tfidf` is the legacy key name for this weight; settings saved by earlier
+    // versions still carry it.
+    const lexicalWeight = settings.weights?.lexical ?? settings.weights?.tfidf ?? 0.55;
+    const tfidfPct = Math.round(lexicalWeight * 100);
     document.getElementById('tfidfWeight').value = tfidfPct;
     document.getElementById('tfidfWeightValue').textContent = `${tfidfPct}%`;
     document.getElementById('skillWeight').value = 100 - tfidfPct;
@@ -346,7 +428,7 @@ function saveSettings() {
       glassdoor: document.getElementById('platformGlassdoor').checked,
     },
     weights: {
-      tfidf: tfidfPct / 100,
+      lexical: tfidfPct / 100,
       skills: (100 - tfidfPct) / 100,
     },
     llmEnabled: document.getElementById('llmEnabled').checked,
@@ -396,6 +478,7 @@ function resetSearchForm() {
   document.getElementById('searchWorkType').value = 'any';
   document.getElementById('searchInterval').value = '60';
   document.getElementById('toggleAddSearch').textContent = '+ Add Search';
+  document.getElementById('saveSearch').textContent = 'Save Search';
   editingProfileId = null;
 }
 
@@ -465,9 +548,10 @@ function updateScanStatuses() {
         statusEl.innerHTML = `<span style="color:var(--danger)">Error: ${escapeHtml(status.error || 'Unknown')}</span>`;
       } else if (status.lastRun) {
         const elapsed = status.elapsed ? ` in ${status.elapsed}s` : '';
+        const enrichInfo = status.enrichedCount ? ` (${status.enrichedCount} enriched)` : '';
         const matchInfo = status.matchCount != null
-          ? `${status.matchCount} matches from ${status.jobsFound || 0} jobs`
-          : `${status.jobsFound || 0} jobs found`;
+          ? `${status.matchCount} matches from ${status.jobsFound || 0} jobs${enrichInfo}`
+          : `${status.jobsFound || 0} jobs found${enrichInfo}`;
         statusEl.textContent = `Last: ${formatTimeAgo(status.lastRun)} — ${matchInfo}${elapsed}`;
       }
     }
@@ -518,6 +602,9 @@ function createProfileCard(profile) {
         <button class="btn-icon run-now" data-run-profile="${profile.id}" title="Run now">
           <svg viewBox="0 0 24 24" fill="none"><polygon points="5,3 19,12 5,21" fill="currentColor"/></svg>
         </button>
+        <button class="btn-icon edit" data-edit-profile="${profile.id}" title="Edit">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
         <button class="btn-icon delete" data-delete-profile="${profile.id}" title="Delete">
           <svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
@@ -536,6 +623,11 @@ function createProfileCard(profile) {
     runSearchNow(profile.id);
   });
 
+  // Edit
+  card.querySelector(`[data-edit-profile="${profile.id}"]`).addEventListener('click', () => {
+    editSearchProfile(profile);
+  });
+
   // Delete
   card.querySelector(`[data-delete-profile="${profile.id}"]`).addEventListener('click', () => {
     searchProfiles = searchProfiles.filter((p) => p.id !== profile.id);
@@ -544,6 +636,20 @@ function createProfileCard(profile) {
   });
 
   return card;
+}
+
+function editSearchProfile(profile) {
+  editingProfileId = profile.id;
+  const form = document.getElementById('searchForm');
+  document.getElementById('searchKeywords').value = profile.keywords || '';
+  document.getElementById('searchLocation').value = profile.location || '';
+  document.getElementById('searchWorkType').value = profile.workType || 'any';
+  document.getElementById('searchInterval').value = String(profile.interval || 60);
+  form.style.display = 'flex';
+  document.getElementById('toggleAddSearch').textContent = 'Cancel';
+  document.getElementById('saveSearch').textContent = 'Update Search';
+  form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.getElementById('searchKeywords').focus();
 }
 
 function saveSearchProfile() {
@@ -557,7 +663,9 @@ function saveSearchProfile() {
     return;
   }
 
-  if (editingProfileId) {
+  const isEdit = !!editingProfileId;
+
+  if (isEdit) {
     const idx = searchProfiles.findIndex((p) => p.id === editingProfileId);
     if (idx !== -1) {
       searchProfiles[idx] = { ...searchProfiles[idx], keywords, location, workType, interval };
@@ -576,8 +684,9 @@ function saveSearchProfile() {
   }
 
   saveAllProfiles();
-  renderSearchProfiles();
   resetSearchForm();
+  renderSearchProfiles();
+  updateStatus(isEdit ? 'Search updated' : 'Search added');
 }
 
 function saveAllProfiles() {
@@ -588,20 +697,53 @@ function saveAllProfiles() {
 }
 
 function runSearchNow(profileId) {
+  const runBtn = document.querySelector(`[data-run-profile="${profileId}"]`);
+  if (runBtn) {
+    runBtn.disabled = true;
+    runBtn.style.opacity = '0.4';
+  }
+
+  const statusEl = document.querySelector(`[data-profile-status="${profileId}"]`);
+  if (statusEl) {
+    statusEl.innerHTML = `
+      <div class="scan-progress">
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill indeterminate" style="width:5%"></div>
+        </div>
+        <div class="scan-detail">
+          <span>Starting scan...</span>
+          <span class="scan-elapsed">0s</span>
+        </div>
+      </div>
+    `;
+  }
+
   startScanPolling();
-  updateScanStatuses();
 
   chrome.runtime.sendMessage({ type: 'RUN_SEARCH_NOW', profileId }, (result) => {
-    if (chrome.runtime.lastError) return;
-    loadSearchProfiles();
-    loadMatches();
+    if (runBtn) {
+      runBtn.disabled = false;
+      runBtn.style.opacity = '';
+    }
 
+    if (chrome.runtime.lastError) {
+      if (statusEl) statusEl.textContent = 'Error: could not reach background worker';
+      return;
+    }
+
+    loadSearchProfiles();
+
+    const enrichInfo = result?.enrichedCount ? `, ${result.enrichedCount} enriched` : '';
     if (result?.matchCount > 0) {
-      updateStatus(`${result.matchCount} matches from ${result.jobsFound} jobs (${result.elapsed}s)`);
+      updateStatus(`${result.matchCount} matches from ${result.jobsFound} jobs${enrichInfo} (${result.elapsed}s)`);
+      switchToTab('dashboard');
+      loadMatches();
+      setTimeout(loadMatches, 500);
     } else if (result?.jobsFound > 0) {
-      updateStatus(`${result.jobsFound} jobs scraped, ${result.matchCount || 0} new matches (${result.elapsed}s)`);
+      updateStatus(`${result.jobsFound} jobs scraped${enrichInfo}, ${result.matchCount || 0} matches (${result.elapsed}s)`);
+      loadMatches();
     } else if (result?.error) {
-      updateStatus('Scan failed');
+      updateStatus(`Scan failed: ${result.error}`);
     } else {
       updateStatus('Scan complete — no jobs found');
     }
@@ -624,10 +766,13 @@ function updateStatus(text) {
   document.getElementById('status').textContent = text;
 }
 
+// Must stay in sync with JobMatcher.getScoreCategory in lib/matcher.js. The
+// popup does not load matcher.js, so the bands are repeated here.
 function getScoreCategory(score) {
-  if (score >= 80) return 'excellent';
-  if (score >= 60) return 'good';
-  if (score >= 40) return 'fair';
+  if (score == null) return 'unknown';
+  if (score >= 75) return 'excellent';
+  if (score >= 55) return 'good';
+  if (score >= 35) return 'fair';
   return 'low';
 }
 

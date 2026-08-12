@@ -100,12 +100,15 @@ Weights are configurable in the Settings tab.
 
 ### Score Categories
 
-| Score | Category | Color |
-|-------|----------|-------|
-| 80–100 | Excellent | Green |
-| 60–79 | Good | Yellow |
-| 40–59 | Fair | Blue |
-| 0–39 | Low | Red |
+| Score | Category |
+|-------|----------|
+| 75–100 | Excellent |
+| 55–74 | Good |
+| 35–54 | Fair |
+| 0–34 | Low |
+
+A job whose description could not be fetched is reported as **unknown**, not as
+a 0% match — the two mean different things.
 
 ## Configuration
 
@@ -113,9 +116,10 @@ All settings are available in the extension popup under the **Settings** tab:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Score Threshold | 70 | Minimum score to trigger notifications |
-| TF-IDF Weight | 60% | Weight for text similarity scoring |
-| Skill Weight | 40% | Weight for skill keyword matching |
+| Score Threshold | 50 | Minimum score to trigger notifications |
+| Text Similarity Weight | 55% | Weight for the lexical similarity component |
+| Skill Weight | 45% | Weight for skill keyword matching |
+| Hybrid LLM Scoring | Off | Use the local Ollama two-stage scorer (needs the backend) |
 | Browser Notifications | On | Chrome push notifications for matches |
 | Email Notifications | Off | Email alerts (requires backend server) |
 | Platforms | All enabled | Toggle LinkedIn, Indeed, Glassdoor |
@@ -131,6 +135,14 @@ The backend server exposes:
 | `POST` | `/api/matches` | Store new matches |
 | `DELETE` | `/api/matches` | Clear all match history |
 | `POST` | `/api/notify` | Send email notification |
+| `POST` | `/api/score` | **Two-stage scoring**: embedding similarity for every job, then an LLM judgement on the top N. Pass `stage2: false` for embeddings only. |
+| `GET` | `/api/score/status` | Ollama reachability and whether both models are pulled |
+| `POST` | `/api/llm/score` | Judge a single job with the LLM |
+| `POST` | `/api/llm/score-batch` | Judge up to 10 jobs |
+| `GET` | `/api/llm/status` | Chat-model health |
+
+CORS is restricted to `chrome-extension://` origins. If you need to allow
+another origin, set `JM_ALLOWED_ORIGINS` to a comma-separated list.
 
 ## Project Structure
 
@@ -151,9 +163,11 @@ job-matcher/
 │   │   ├── options.html       # Full options page
 │   │   └── options.js         # Options logic
 │   ├── lib/
-│   │   ├── tfidf.js           # TF-IDF vectorizer + cosine similarity
+│   │   ├── vocab.js           # Skill vocabulary (single source of truth)
+│   │   ├── tfidf.js           # Lexical similarity (IDF-weighted coverage)
 │   │   ├── matcher.js         # Job scoring engine
-│   │   └── parser.js          # Resume file parser (PDF/DOCX/text)
+│   │   ├── parser.js          # Resume file parser (PDF/DOCX/text)
+│   │   └── pdf.min.js         # Vendored pdf.js
 │   └── icons/
 │       ├── icon-16.png
 │       ├── icon-48.png
@@ -163,10 +177,66 @@ job-matcher/
 │   ├── db.js                  # SQLite database layer
 │   ├── email.js               # Nodemailer email service
 │   ├── package.json
+│   ├── llm.js                 # Ollama chat client (LLM judge)
+│   ├── embeddings.js          # Ollama embeddings, chunking, max-sim, cache
 │   └── routes/
 │       ├── matches.js         # Match CRUD endpoints
-│       └── notify.js          # Email notification endpoint
+│       ├── notify.js          # Email notification endpoint
+│       ├── llm.js             # LLM scoring endpoints
+│       └── score.js           # Two-stage scoring endpoint
+├── eval/                      # Scorer evaluation harness
+│   ├── run.js                 # Compare scorer variants on a labelled set
+│   ├── seed.js                # Build a golden set from your own scraped jobs
+│   ├── metrics.js             # precision@k, NDCG@k, Spearman
+│   └── fixtures/              # Synthetic golden set (ships with the repo)
+├── test/                      # node:test suites
 └── README.md
+```
+
+## Scoring
+
+Scoring runs in two places.
+
+**Locally, in the extension** (always available, no server needed):
+1. *Lexical* — IDF-weighted coverage: what fraction of the posting's weighted
+   term mass appears in the resume. IDF is built across every job in the scan,
+   not per job-pair.
+2. *Skills* — coverage of the posting's named skills, damped when the posting
+   names too few to be confident.
+3. *Role fit* — penalties for mismatches the text cannot show: a recruiting or
+   sales posting that quotes the whole engineering stack, a large seniority gap.
+
+**On the backend** (when hybrid scoring is enabled and Ollama is running):
+1. *Stage 1* — every job is chunked and embedded with `nomic-embed-text`, then
+   scored by max-sim pooling against the resume's chunks. Vectors are cached in
+   SQLite, so a rescore is nearly free.
+2. *Stage 2* — the top N go to the chat model for a judged score with a
+   rationale. That score is the one displayed.
+
+If the backend or Ollama is unavailable, the local scores stand and the match is
+labelled `local` so it is never mistaken for a model-judged result.
+
+## Development
+
+```bash
+npm test          # run all test suites
+npm run eval      # compare scorer variants on the golden set
+```
+
+The eval harness is the gate for scoring changes. The bundled golden set is
+synthetic; for numbers that reflect your own search, build one from your
+scraped jobs:
+
+```bash
+node eval/seed.js --help
+```
+
+To enable the embedding variants:
+
+```bash
+ollama serve
+ollama pull nomic-embed-text
+ollama pull llama3.1:8b
 ```
 
 ## Tech Stack
